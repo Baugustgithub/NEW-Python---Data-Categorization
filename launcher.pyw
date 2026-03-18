@@ -100,6 +100,12 @@ class App(tk.Tk):
                                  font=("Helvetica", 11, "bold"), padx=20, pady=6)
         self.run_btn.pack(side="right")
 
+        # Excel-only button — skip categorization, just build Excel from existing CSV
+        self.excel_btn = self._btn(btn_row, "📊  Excel from CSV",
+                                   self._run_excel_only, ACCENT, fg="white",
+                                   font=("Helvetica", 9), padx=12, pady=6)
+        self.excel_btn.pack(side="right", padx=(0, 8))
+
         # ── Output folder ────────────────────────────────────────────────────
         out_row = tk.Frame(body, bg=BG, pady=4)
         out_row.pack(fill="x")
@@ -326,11 +332,63 @@ class App(tk.Tk):
         finally:
             self.after(0, self._done)
 
+    # ── Excel-only mode ────────────────────────────────────────────────────
+
+    def _run_excel_only(self):
+        if self.running:
+            return
+        csv_path = filedialog.askopenfilename(
+            title="Select categorized CSV file",
+            initialdir=self.out_var.get() or script_dir,
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        if not csv_path:
+            return
+
+        self.running = True
+        self.run_btn.configure(state="disabled", bg=MUTED)
+        self.excel_btn.configure(text="⏳  Building…", state="disabled", bg=MUTED)
+        self.progress.start(12)
+        self._log("─" * 60, "hdr")
+        self._log(f"Building Excel from: {os.path.basename(csv_path)}", "hdr")
+
+        threading.Thread(target=self._excel_worker, args=(csv_path,), daemon=True).start()
+
+    def _excel_worker(self, csv_path):
+        try:
+            import subprocess
+            out_dir = self.out_var.get() or script_dir
+            xlsx_path = os.path.join(out_dir, "Procurement_Detail_Breakdown.xlsx")
+
+            python_exe = sys.executable.replace("pythonw.exe", "python.exe")
+            result = subprocess.run(
+                [python_exe, os.path.join(script_dir, "build_detail_excel_v2.py"),
+                 csv_path, xlsx_path],
+                capture_output=True, text=True
+            )
+            if result.stdout:
+                self._log(result.stdout.strip())
+            if result.returncode != 0:
+                err_msg = result.stderr.strip() if result.stderr else "unknown error"
+                self._log(f"Excel generation failed: {err_msg}", "err")
+            else:
+                self._log(f"Excel saved: {xlsx_path}", "ok")
+                self._log("Done! Open Procurement_Detail_Breakdown.xlsx to view results.", "ok")
+            self._log("─" * 60, "hdr")
+        except Exception as e:
+            import traceback
+            self._log(f"ERROR: {e}", "err")
+            self._log(traceback.format_exc(), "err")
+        finally:
+            self.after(0, self._done)
+
     def _done(self):
         self.running = False
         self.progress.stop()
         self.run_btn.configure(text="▶  Run Categorization",
                                state="normal", bg=ACCENT2)
+        self.excel_btn.configure(text="📊  Excel from CSV",
+                                 state="normal", bg=ACCENT)
 
 
 if __name__ == "__main__":
