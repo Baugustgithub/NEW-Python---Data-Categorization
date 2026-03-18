@@ -298,14 +298,21 @@ class App(tk.Tk):
             xlsx_path = os.path.join(out_dir, "Procurement_Detail_Breakdown.xlsx")
             self._log("Building Excel report…")
             import subprocess
+            # Use python.exe (not pythonw.exe) so the subprocess can write to
+            # stdout/stderr normally.  sys.executable inside a .pyw is pythonw.
+            python_exe = sys.executable.replace("pythonw.exe", "python.exe")
             excel_result = subprocess.run(
-                [sys.executable, os.path.join(script_dir, "build_detail_excel_v2.py"),
+                [python_exe, os.path.join(script_dir, "build_detail_excel_v2.py"),
                  csv_path, xlsx_path],
-                capture_output=True, text=True, check=True
+                capture_output=True, text=True
             )
             if excel_result.stdout:
                 self._log(excel_result.stdout.strip())
-            self._log(f"Excel saved: {xlsx_path}", "ok")
+            if excel_result.returncode != 0:
+                err_msg = excel_result.stderr.strip() if excel_result.stderr else "unknown error"
+                self._log(f"Excel generation failed: {err_msg}", "err")
+            else:
+                self._log(f"Excel saved: {xlsx_path}", "ok")
             self._log("─" * 60, "hdr")
             self._log("Done! Open Procurement_Analysis.xlsx to view results.", "ok")
 
