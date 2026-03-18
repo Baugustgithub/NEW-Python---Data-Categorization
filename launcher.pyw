@@ -314,7 +314,10 @@ class App(tk.Tk):
             else:
                 self._log(f"Excel saved: {xlsx_path}", "ok")
             self._log("─" * 60, "hdr")
-            self._log("Done! Open Procurement_Analysis.xlsx to view results.", "ok")
+            if excel_result.returncode == 0:
+                self._log("Done! Open Procurement_Detail_Breakdown.xlsx to view results.", "ok")
+            else:
+                self._log("Categorization complete. CSV saved but Excel report failed.", "warn")
 
         except Exception as e:
             import traceback
