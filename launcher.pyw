@@ -240,7 +240,6 @@ class App(tk.Tk):
     def _worker(self):
         try:
             import pandas as pd
-            from run_categorization import build_excel_report, _read_file_robust
             from categorization import categorize_dataframe
 
             out_dir = self.out_var.get() or script_dir
@@ -250,7 +249,14 @@ class App(tk.Tk):
             for f in self.files:
                 self._log(f"Reading: {os.path.basename(f)}")
                 try:
-                    df = _read_file_robust(f)
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in (".xlsx", ".xls"):
+                        df = pd.read_excel(f)
+                    else:
+                        try:
+                            df = pd.read_csv(f, low_memory=False)
+                        except UnicodeDecodeError:
+                            df = pd.read_csv(f, low_memory=False, encoding="latin-1")
                     self._log(f"  → {len(df):,} rows", "ok")
                     dfs.append(df)
                 except Exception as e:
@@ -289,9 +295,16 @@ class App(tk.Tk):
             self._log(f"CSV saved: {csv_path}", "ok")
 
             # ── Write Excel ─────────────────────────────────────────────────
-            xlsx_path = os.path.join(out_dir, "Procurement_Analysis.xlsx")
+            xlsx_path = os.path.join(out_dir, "Procurement_Detail_Breakdown.xlsx")
             self._log("Building Excel report…")
-            build_excel_report(result, xlsx_path)
+            import subprocess
+            excel_result = subprocess.run(
+                [sys.executable, os.path.join(script_dir, "build_detail_excel_v2.py"),
+                 csv_path, xlsx_path],
+                capture_output=True, text=True, check=True
+            )
+            if excel_result.stdout:
+                self._log(excel_result.stdout.strip())
             self._log(f"Excel saved: {xlsx_path}", "ok")
             self._log("─" * 60, "hdr")
             self._log("Done! Open Procurement_Analysis.xlsx to view results.", "ok")
