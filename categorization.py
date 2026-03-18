@@ -835,6 +835,15 @@ def rule_pass_label(n):
             3:"Category Metadata", 4:"Keyword / Regex", 5:"Account-Family Fallback"}.get(n, "Unknown")
 
 def categorize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    # Drop any pre-existing categorization columns to avoid duplicates
+    # (happens when re-processing already-categorized files)
+    cat_cols = {"master_bucket", "sub_bucket_l2", "sub_bucket_l3",
+                "rule_pass", "rule_pass_label", "rule_hit",
+                "confidence_score", "confidence_label", "services_review_flag"}
+    existing = [c for c in df.columns if c in cat_cols]
+    if existing:
+        df = df.drop(columns=existing)
+
     # Run rule engine — one dict per row
     results = df.apply(lambda r: categorize_row(r.to_dict()), axis=1, result_type="expand")
 
