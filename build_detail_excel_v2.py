@@ -1,44 +1,94 @@
 """
 build_detail_excel_v2.py
 
-Builds a multi-sheet Excel workbook from categorized_output.csv.
+Builds a procurement intelligence workbook from categorized_output.csv.
 
 Sheets:
-1) Summary
-2) Spend by Bucket
-3) Top Vendors
-4) Services Review Queue
-5) Uncategorized
+1) How This Was Built        – methodology & data summary
+2) Bucket Hierarchy          – 3-level spend taxonomy
+3) Top 30 Vendors            – largest vendors per bucket
+4) Vendor Concentration      – concentration risk metrics per bucket
+5) Spend by Period           – monthly spend heatmap by bucket
+6) Single-Txn Vendors        – tail-spend / one-off vendor list
 
 Usage:
-    py -3.12 build_detail_excel_v2.py
-    py -3.12 build_detail_excel_v2.py <categorized_csv> <out_xlsx>
+    py build_detail_excel_v2.py
+    py build_detail_excel_v2.py <categorized_csv> <out_xlsx>
 """
 
 import os
 import re
 import sys
 from datetime import datetime
+
 import pandas as pd
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side, numbers
+from openpyxl.utils import get_column_letter
 
+# ── Constants ────────────────────────────────────────────────────────────────
 
-# Illegal XML 1.0 characters that openpyxl rejects
-_ILLEGAL_XML_RE = re.compile(
-    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]"
+_ILLEGAL_XML_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+# Color palette
+NAVY       = "1B2A4A"
+DARK_BLUE  = "2C3E6B"
+ACCENT     = "4472C4"
+LIGHT_BLUE = "D6E4F0"
+PALE_BLUE  = "EDF2F9"
+WHITE      = "FFFFFF"
+LIGHT_GRAY = "F2F2F2"
+MID_GRAY   = "D9D9D9"
+DARK_GRAY  = "595959"
+GREEN      = "548235"
+AMBER      = "BF8F00"
+RED        = "C00000"
+
+# Fonts
+FONT_TITLE  = Font(name="Calibri", size=16, bold=True, color=WHITE)
+FONT_H2     = Font(name="Calibri", size=12, bold=True, color=NAVY)
+FONT_H3     = Font(name="Calibri", size=11, bold=True, color=DARK_BLUE)
+FONT_HEADER = Font(name="Calibri", size=10, bold=True, color=WHITE)
+FONT_BODY   = Font(name="Calibri", size=10, color="000000")
+FONT_BODY_BOLD = Font(name="Calibri", size=10, bold=True, color="000000")
+FONT_MUTED  = Font(name="Calibri", size=9, italic=True, color=DARK_GRAY)
+FONT_NOTE   = Font(name="Calibri", size=9, color=DARK_GRAY)
+
+# Fills
+FILL_TITLE  = PatternFill("solid", fgColor=NAVY)
+FILL_HEADER = PatternFill("solid", fgColor=ACCENT)
+FILL_ROW_A  = PatternFill("solid", fgColor=WHITE)
+FILL_ROW_B  = PatternFill("solid", fgColor=PALE_BLUE)
+FILL_LIGHT  = PatternFill("solid", fgColor=LIGHT_BLUE)
+FILL_BUCKET = PatternFill("solid", fgColor=LIGHT_GRAY)
+
+# Border
+THIN_BORDER = Border(
+    bottom=Side(style="thin", color=MID_GRAY),
+)
+HEADER_BORDER = Border(
+    bottom=Side(style="medium", color=NAVY),
 )
 
+# Alignment
+ALIGN_LEFT   = Alignment(horizontal="left", vertical="center", wrap_text=True)
+ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
+ALIGN_RIGHT  = Alignment(horizontal="right", vertical="center")
+ALIGN_WRAP   = Alignment(horizontal="left", vertical="top", wrap_text=True)
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _sanitize_for_excel(df: pd.DataFrame) -> pd.DataFrame:
     """Strip characters that are illegal in Excel/XML cells."""
-    obj_cols = df.select_dtypes(include=["object"]).columns
-    for col in obj_cols:
+    df = df.copy()
+    for col in df.select_dtypes(include=["object"]).columns:
         df[col] = df[col].apply(
             lambda v: _ILLEGAL_XML_RE.sub("", v) if isinstance(v, str) else v
         )
     return df
 
 
-def _safe_num_series(s: pd.Series) -> pd.Series:
+def _safe_num(s: pd.Series) -> pd.Series:
     return (
         s.astype(str)
         .str.replace("$", "", regex=False)
@@ -69,134 +119,692 @@ def _coerce_date(df: pd.DataFrame) -> pd.Series:
     return pd.to_datetime(pd.Series([pd.NaT] * len(df)))
 
 
-def _infer_month_fy(dates: pd.Series):
-    # VCU fiscal year assumed July 1 – June 30
-    month = dates.dt.to_period("M").astype(str)
-    fy = dates.dt.year
-    fy = fy.where(dates.dt.month < 7, fy + 1)  # Jul–Dec -> next FY
-    return month, fy
-
-
-def _infer_on_contract(df: pd.DataFrame) -> pd.Series:
-    # Intentionally narrow: only "contract order" counts by method
-    ON_CONTRACT_METHODS = {"contract order"}
-
-    contract_cols = [c for c in ["Contract No", "Contract Number", "Contract #", "Contract"] if c in df.columns]
-    if contract_cols:
-        has_contract_num = df[contract_cols].astype(str).apply(
-            lambda r: any(x.strip() and x.strip().lower() not in {"nan", "none"} for x in r),
-            axis=1
-        )
-    else:
-        has_contract_num = pd.Series([False] * len(df))
-
-    method_col = None
-    for c in ["Procurement Method", "Method", "Payment Method", "PO Type", "Order Type",
-              "Procurement Method (For Purchasing Use Only)"]:
+def _find_vendor_col(df: pd.DataFrame):
+    for c in ["Vendor Name", "Vendor", "Supplier", "Primary Second Party"]:
         if c in df.columns:
-            method_col = c
+            return c
+    return None
+
+
+def _fmt_currency(v):
+    """Format a number as $X,XXX."""
+    try:
+        return f"${v:,.0f}"
+    except (ValueError, TypeError):
+        return str(v)
+
+
+def _set_col_widths(ws, widths: dict):
+    """Set column widths by 1-based column index."""
+    for col_idx, w in widths.items():
+        ws.column_dimensions[get_column_letter(col_idx)].width = w
+
+
+def _write_title_banner(ws, title: str, subtitle: str, max_col: int):
+    """Write a styled title row spanning max_col columns at row 1."""
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_col)
+    cell = ws.cell(row=1, column=1, value=title)
+    cell.font = FONT_TITLE
+    cell.fill = FILL_TITLE
+    cell.alignment = ALIGN_LEFT
+    ws.row_dimensions[1].height = 36
+
+    if subtitle:
+        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max_col)
+        cell2 = ws.cell(row=2, column=1, value=subtitle)
+        cell2.font = FONT_MUTED
+        cell2.alignment = ALIGN_LEFT
+        ws.row_dimensions[2].height = 20
+    # Fill entire banner rows
+    for c in range(1, max_col + 1):
+        ws.cell(row=1, column=c).fill = FILL_TITLE
+
+
+def _write_header_row(ws, row: int, headers: list, col_start: int = 1):
+    """Write a styled header row."""
+    for i, h in enumerate(headers, start=col_start):
+        cell = ws.cell(row=row, column=i, value=h)
+        cell.font = FONT_HEADER
+        cell.fill = FILL_HEADER
+        cell.alignment = ALIGN_CENTER
+        cell.border = HEADER_BORDER
+    ws.row_dimensions[row].height = 24
+
+
+def _write_data_rows(ws, start_row: int, data: list, col_start: int = 1,
+                     currency_cols=None, pct_cols=None, int_cols=None):
+    """Write data rows with alternating fills and number formatting."""
+    currency_cols = set(currency_cols or [])
+    pct_cols = set(pct_cols or [])
+    int_cols = set(int_cols or [])
+    for r_idx, row_data in enumerate(data):
+        row_num = start_row + r_idx
+        fill = FILL_ROW_B if r_idx % 2 == 1 else FILL_ROW_A
+        for c_idx, val in enumerate(row_data, start=col_start):
+            cell = ws.cell(row=row_num, column=c_idx, value=val)
+            cell.font = FONT_BODY
+            cell.fill = fill
+            cell.border = THIN_BORDER
+            cell.alignment = ALIGN_LEFT
+            if c_idx in currency_cols:
+                cell.number_format = '$#,##0'
+                cell.alignment = ALIGN_RIGHT
+            elif c_idx in pct_cols:
+                cell.number_format = '0.0%'
+                cell.alignment = ALIGN_RIGHT
+            elif c_idx in int_cols:
+                cell.number_format = '#,##0'
+                cell.alignment = ALIGN_RIGHT
+    return start_row + len(data)
+
+
+def _freeze_and_filter(ws, freeze_row: int, max_col: int):
+    """Freeze panes below freeze_row and add auto-filter."""
+    ws.freeze_panes = ws.cell(row=freeze_row, column=1)
+    ws.auto_filter.ref = f"A{freeze_row - 1}:{get_column_letter(max_col)}{ws.max_row}"
+
+
+# ── Sheet builders ───────────────────────────────────────────────────────────
+
+def _build_methodology(wb, df, total_spend, total_rows, vendor_col, generated):
+    """Sheet 1: How This Was Built."""
+    ws = wb.create_sheet("How This Was Built")
+    MAX_COL = 6
+    _write_title_banner(ws, "How This Was Built", "Methodology & Data Summary", MAX_COL)
+
+    row = 4
+    sections = [
+        ("Data Source",
+         "This report is built from transaction-level procurement data (PO line detail). "
+         "Each row represents a single purchase order line with vendor, commodity, dollar amount, "
+         "and date information."),
+        ("Categorization Method",
+         "A multi-pass rules engine classified each transaction into a three-level bucket hierarchy:\n"
+         "  Pass 0 – Vendor hard overrides (known vendor → forced bucket)\n"
+         "  Pass 1 – Commodity code crosswalk (NIGP/commodity code → bucket mapping)\n"
+         "  Pass 2 – Vendor always-list (vendor name pattern → bucket)\n"
+         "  Pass 3 – Category metadata (L1 category field → bucket)\n"
+         "  Pass 4 – Keyword / regex matching on description fields\n"
+         "  Pass 5 – Account-family fallback (GL account prefix → bucket)\n\n"
+         "Each transaction is assigned the first matching rule. Confidence scores reflect "
+         "the specificity and reliability of the matching pass."),
+        ("Bucket Structure",
+         "Spend is organized into three levels:\n"
+         "  Level 1 – Master Bucket (e.g. IT, Facilities / MRO, Services)\n"
+         "  Level 2 – Sub-Bucket (e.g. IT Software / SaaS, Trades Services)\n"
+         "  Level 3 – Detail (e.g. Network Security Equipment, Plumbing & HVAC)\n\n"
+         "This hierarchy is defined in the commodity_codes and subcategory_to_major reference files."),
+        ("Intended Use",
+         "This workbook is a procurement intelligence report for management review. "
+         "It communicates spend composition, vendor dependence, concentration risk, "
+         "timing patterns, and tail-spend fragmentation to support strategic sourcing decisions."),
+    ]
+
+    for title, body in sections:
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=MAX_COL)
+        cell = ws.cell(row=row, column=1, value=title)
+        cell.font = FONT_H2
+        ws.row_dimensions[row].height = 22
+        row += 1
+
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=MAX_COL)
+        cell = ws.cell(row=row, column=1, value=body)
+        cell.font = FONT_BODY
+        cell.alignment = ALIGN_WRAP
+        ws.row_dimensions[row].height = max(60, body.count("\n") * 15 + 30)
+        row += 2
+
+    # Data summary table
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=MAX_COL)
+    ws.cell(row=row, column=1, value="Data Summary").font = FONT_H2
+    row += 1
+
+    # Confidence breakdown
+    conf_counts = {}
+    if "confidence_label" in df.columns:
+        conf_counts = df["confidence_label"].value_counts().to_dict()
+
+    # Rule pass breakdown
+    pass_counts = {}
+    if "rule_pass_label" in df.columns:
+        pass_counts = df["rule_pass_label"].value_counts().to_dict()
+
+    bucket_count = df["master_bucket"].nunique()
+    vendor_count = df[vendor_col].nunique() if vendor_col else 0
+
+    summary_items = [
+        ("Total Rows", f"{total_rows:,}"),
+        ("Total Spend", _fmt_currency(total_spend)),
+        ("Unique Vendors", f"{vendor_count:,}"),
+        ("Master Buckets", f"{bucket_count}"),
+        ("", ""),
+        ("Confidence Breakdown", ""),
+    ]
+    for label in ["Very High", "High", "Medium", "Low"]:
+        cnt = conf_counts.get(label, 0)
+        pct = cnt / total_rows * 100 if total_rows else 0
+        summary_items.append((f"  {label}", f"{cnt:,}  ({pct:.1f}%)"))
+
+    summary_items.append(("", ""))
+    summary_items.append(("Classification Method Breakdown", ""))
+    for label, cnt in sorted(pass_counts.items(), key=lambda x: -x[1]):
+        pct = cnt / total_rows * 100 if total_rows else 0
+        summary_items.append((f"  {label}", f"{cnt:,}  ({pct:.1f}%)"))
+
+    summary_items.append(("", ""))
+    summary_items.append(("Report Generated", generated))
+
+    for metric, value in summary_items:
+        c1 = ws.cell(row=row, column=1, value=metric)
+        c2 = ws.cell(row=row, column=3, value=value)
+        if metric and not metric.startswith("  "):
+            c1.font = FONT_BODY_BOLD
+        else:
+            c1.font = FONT_BODY
+        c2.font = FONT_BODY
+        ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=4)
+        row += 1
+
+    _set_col_widths(ws, {1: 36, 2: 4, 3: 20, 4: 20, 5: 16, 6: 16})
+    ws.sheet_properties.tabColor = NAVY
+
+
+def _build_bucket_hierarchy(wb, df, total_spend):
+    """Sheet 2: Bucket Hierarchy – three-level spend taxonomy."""
+    ws = wb.create_sheet("Bucket Hierarchy")
+
+    headers = ["Master Bucket", "Sub-Bucket", "Detail",
+               "Transactions", "Total Spend", "% of Bucket", "% of Total"]
+    MAX_COL = len(headers)
+    _write_title_banner(ws, "Bucket Hierarchy",
+                        "Spend structure from master bucket → sub-bucket → detail", MAX_COL)
+
+    HEADER_ROW = 4
+    _write_header_row(ws, HEADER_ROW, headers)
+
+    l2_col = "sub_bucket_l2" if "sub_bucket_l2" in df.columns else None
+    l3_col = "sub_bucket_l3" if "sub_bucket_l3" in df.columns else None
+
+    # Build hierarchy data
+    rows_data = []
+    bucket_order = (
+        df.groupby("master_bucket")["_spend"].sum()
+        .sort_values(ascending=False).index.tolist()
+    )
+
+    for bucket in bucket_order:
+        bdf = df[df["master_bucket"] == bucket]
+        bucket_spend = bdf["_spend"].sum()
+        bucket_count = len(bdf)
+        # Master bucket summary row
+        rows_data.append({
+            "level": 0,
+            "values": [bucket, "", "", bucket_count, bucket_spend,
+                       1.0, bucket_spend / total_spend if total_spend else 0]
+        })
+
+        if l2_col:
+            l2_order = (
+                bdf.groupby(l2_col)["_spend"].sum()
+                .sort_values(ascending=False).index.tolist()
+            )
+            for sub in l2_order:
+                sdf = bdf[bdf[l2_col] == sub]
+                sub_spend = sdf["_spend"].sum()
+                sub_count = len(sdf)
+                rows_data.append({
+                    "level": 1,
+                    "values": ["", str(sub), "", sub_count, sub_spend,
+                               sub_spend / bucket_spend if bucket_spend else 0,
+                               sub_spend / total_spend if total_spend else 0]
+                })
+
+                if l3_col:
+                    l3_order = (
+                        sdf.groupby(l3_col)["_spend"].sum()
+                        .sort_values(ascending=False).index.tolist()
+                    )
+                    for detail in l3_order:
+                        ddf = sdf[sdf[l3_col] == detail]
+                        det_spend = ddf["_spend"].sum()
+                        det_count = len(ddf)
+                        rows_data.append({
+                            "level": 2,
+                            "values": ["", "", str(detail), det_count, det_spend,
+                                       det_spend / bucket_spend if bucket_spend else 0,
+                                       det_spend / total_spend if total_spend else 0]
+                        })
+
+    # Write rows with level-based formatting
+    row = HEADER_ROW + 1
+    for item in rows_data:
+        level = item["level"]
+        vals = item["values"]
+        for c_idx, val in enumerate(vals, start=1):
+            cell = ws.cell(row=row, column=c_idx, value=val)
+            cell.border = THIN_BORDER
+            if level == 0:
+                cell.font = FONT_BODY_BOLD
+                cell.fill = FILL_BUCKET
+            elif level == 1:
+                cell.font = FONT_BODY
+                cell.fill = FILL_ROW_A
+            else:
+                cell.font = FONT_NOTE
+                cell.fill = FILL_ROW_A
+
+            if c_idx == 4:  # Transactions
+                cell.number_format = '#,##0'
+                cell.alignment = ALIGN_RIGHT
+            elif c_idx == 5:  # Spend
+                cell.number_format = '$#,##0'
+                cell.alignment = ALIGN_RIGHT
+            elif c_idx in (6, 7):  # Percentages
+                cell.number_format = '0.0%'
+                cell.alignment = ALIGN_RIGHT
+        row += 1
+
+    _set_col_widths(ws, {1: 32, 2: 32, 3: 36, 4: 14, 5: 18, 6: 13, 7: 13})
+    _freeze_and_filter(ws, HEADER_ROW + 1, MAX_COL)
+    ws.sheet_properties.tabColor = ACCENT
+
+
+def _build_top_vendors(wb, df, total_spend, vendor_col):
+    """Sheet 3: Top 30 Vendors per bucket."""
+    ws = wb.create_sheet("Top 30 Vendors")
+
+    headers = ["Master Bucket", "Rank", "Vendor", "Transactions",
+               "Total Spend", "Avg Txn Size", "% of Bucket", "% of Total"]
+    MAX_COL = len(headers)
+    _write_title_banner(ws, "Top 30 Vendors",
+                        "Largest vendors by spend within each category", MAX_COL)
+
+    HEADER_ROW = 4
+    _write_header_row(ws, HEADER_ROW, headers)
+
+    if not vendor_col:
+        ws.cell(row=HEADER_ROW + 1, column=1, value="No vendor column found in data.").font = FONT_MUTED
+        _set_col_widths(ws, {1: 32, 2: 8, 3: 40, 4: 14, 5: 18, 6: 16, 7: 13, 8: 13})
+        ws.sheet_properties.tabColor = DARK_BLUE
+        return
+
+    bucket_order = (
+        df.groupby("master_bucket")["_spend"].sum()
+        .sort_values(ascending=False).index.tolist()
+    )
+
+    rows_data = []
+    for bucket in bucket_order:
+        bdf = df[df["master_bucket"] == bucket]
+        bucket_spend = bdf["_spend"].sum()
+
+        vendor_agg = (
+            bdf.groupby(vendor_col)["_spend"]
+            .agg(total="sum", count="size")
+            .sort_values("total", ascending=False)
+            .head(30)
+            .reset_index()
+        )
+
+        for rank, (_, vr) in enumerate(vendor_agg.iterrows(), start=1):
+            vname = str(vr[vendor_col])
+            vname = _ILLEGAL_XML_RE.sub("", vname) if isinstance(vname, str) else vname
+            vspend = vr["total"]
+            vcount = int(vr["count"])
+            avg_txn = vspend / vcount if vcount else 0
+            rows_data.append([
+                bucket, rank, vname, vcount, vspend, avg_txn,
+                vspend / bucket_spend if bucket_spend else 0,
+                vspend / total_spend if total_spend else 0,
+            ])
+
+    _write_data_rows(ws, HEADER_ROW + 1, rows_data,
+                     currency_cols={5, 6}, pct_cols={7, 8}, int_cols={2, 4})
+
+    _set_col_widths(ws, {1: 32, 2: 8, 3: 40, 4: 14, 5: 18, 6: 16, 7: 13, 8: 13})
+    _freeze_and_filter(ws, HEADER_ROW + 1, MAX_COL)
+    ws.sheet_properties.tabColor = DARK_BLUE
+
+
+def _build_vendor_concentration(wb, df, total_spend, vendor_col):
+    """Sheet 4: Vendor Concentration – risk & opportunity metrics per bucket."""
+    ws = wb.create_sheet("Vendor Concentration")
+
+    headers = ["Master Bucket", "Bucket Spend", "Unique Vendors",
+               "Top-1 Share", "Top-3 Share", "Top-5 Share", "Top-10 Share",
+               "Single-Txn Vendors", "Single-Txn % of Vendors", "Concentration Flag"]
+    MAX_COL = len(headers)
+    _write_title_banner(ws, "Vendor Concentration",
+                        "Supplier dependency risk and consolidation opportunities by category",
+                        MAX_COL)
+
+    HEADER_ROW = 4
+    _write_header_row(ws, HEADER_ROW, headers)
+
+    if not vendor_col:
+        ws.cell(row=HEADER_ROW + 1, column=1, value="No vendor column found.").font = FONT_MUTED
+        ws.sheet_properties.tabColor = RED
+        return
+
+    bucket_order = (
+        df.groupby("master_bucket")["_spend"].sum()
+        .sort_values(ascending=False).index.tolist()
+    )
+
+    rows_data = []
+    for bucket in bucket_order:
+        bdf = df[df["master_bucket"] == bucket]
+        bucket_spend = bdf["_spend"].sum()
+
+        vendor_spend = (
+            bdf.groupby(vendor_col)["_spend"].sum()
+            .sort_values(ascending=False)
+        )
+        unique_vendors = len(vendor_spend)
+        if unique_vendors == 0 or bucket_spend == 0:
+            continue
+
+        cumulative = vendor_spend.cumsum()
+        top1  = float(vendor_spend.iloc[0] / bucket_spend) if unique_vendors >= 1 else 0
+        top3  = float(cumulative.iloc[min(2, unique_vendors - 1)] / bucket_spend)
+        top5  = float(cumulative.iloc[min(4, unique_vendors - 1)] / bucket_spend)
+        top10 = float(cumulative.iloc[min(9, unique_vendors - 1)] / bucket_spend)
+
+        # Single-transaction vendors
+        txn_counts = bdf.groupby(vendor_col).size()
+        single_txn = int((txn_counts == 1).sum())
+        single_pct = single_txn / unique_vendors if unique_vendors else 0
+
+        # Concentration flag
+        if top1 >= 0.50:
+            flag = "High – single vendor dominance"
+        elif top3 >= 0.70:
+            flag = "Moderate – top 3 control >70%"
+        elif single_pct >= 0.60:
+            flag = "Fragmented – many one-off vendors"
+        else:
+            flag = "Balanced"
+
+        rows_data.append([
+            bucket, bucket_spend, unique_vendors,
+            top1, top3, top5, top10,
+            single_txn, single_pct, flag,
+        ])
+
+    row = HEADER_ROW + 1
+    for r_idx, rd in enumerate(rows_data):
+        fill = FILL_ROW_B if r_idx % 2 == 1 else FILL_ROW_A
+        for c_idx, val in enumerate(rd, start=1):
+            cell = ws.cell(row=row, column=c_idx, value=val)
+            cell.font = FONT_BODY
+            cell.fill = fill
+            cell.border = THIN_BORDER
+            if c_idx == 2:
+                cell.number_format = '$#,##0'
+                cell.alignment = ALIGN_RIGHT
+            elif c_idx == 3:
+                cell.number_format = '#,##0'
+                cell.alignment = ALIGN_RIGHT
+            elif c_idx in (4, 5, 6, 7, 9):
+                cell.number_format = '0.0%'
+                cell.alignment = ALIGN_RIGHT
+            elif c_idx == 8:
+                cell.number_format = '#,##0'
+                cell.alignment = ALIGN_RIGHT
+            elif c_idx == 10:
+                cell.alignment = ALIGN_LEFT
+                # Color-code the flag
+                flag_val = str(val)
+                if flag_val.startswith("High"):
+                    cell.font = Font(name="Calibri", size=10, bold=True, color=RED)
+                elif flag_val.startswith("Moderate"):
+                    cell.font = Font(name="Calibri", size=10, color=AMBER)
+                elif flag_val.startswith("Fragmented"):
+                    cell.font = Font(name="Calibri", size=10, color=AMBER)
+                elif flag_val.startswith("Balanced"):
+                    cell.font = Font(name="Calibri", size=10, color=GREEN)
+        row += 1
+
+    _set_col_widths(ws, {1: 32, 2: 18, 3: 16, 4: 12, 5: 12, 6: 12, 7: 12,
+                         8: 18, 9: 20, 10: 34})
+    _freeze_and_filter(ws, HEADER_ROW + 1, MAX_COL)
+    ws.sheet_properties.tabColor = RED
+
+
+def _build_spend_by_period(wb, df, total_spend):
+    """Sheet 5: Spend by Period – monthly heatmap by bucket."""
+    ws = wb.create_sheet("Spend by Period")
+
+    periods = sorted(df["_month"].dropna().unique().tolist())
+    headers = ["Master Bucket", "Total Spend"] + [str(p) for p in periods]
+    MAX_COL = len(headers)
+    _write_title_banner(ws, "Spend by Period",
+                        "Monthly spend by category – darker shading indicates higher relative spend",
+                        MAX_COL)
+
+    HEADER_ROW = 4
+    _write_header_row(ws, HEADER_ROW, headers)
+
+    bucket_order = (
+        df.groupby("master_bucket")["_spend"].sum()
+        .sort_values(ascending=False).index.tolist()
+    )
+
+    pivot = df.pivot_table(index="master_bucket", columns="_month",
+                           values="_spend", aggfunc="sum", fill_value=0)
+    # Ensure all periods are present
+    for p in periods:
+        if p not in pivot.columns:
+            pivot[p] = 0
+    pivot = pivot[periods]
+
+    # For heatmap: find max cell value across pivot
+    max_val = pivot.values.max() if pivot.values.size > 0 else 1
+    if max_val == 0:
+        max_val = 1
+
+    # Heatmap color ramp: white → light blue → accent blue
+    def _heat_fill(val):
+        if val <= 0:
+            return PatternFill("solid", fgColor=WHITE)
+        intensity = min(val / max_val, 1.0)
+        if intensity < 0.25:
+            return PatternFill("solid", fgColor=WHITE)
+        elif intensity < 0.50:
+            return PatternFill("solid", fgColor=PALE_BLUE)
+        elif intensity < 0.75:
+            return PatternFill("solid", fgColor=LIGHT_BLUE)
+        else:
+            return PatternFill("solid", fgColor="B4C6E7")
+
+    row = HEADER_ROW + 1
+    for r_idx, bucket in enumerate(bucket_order):
+        fill = FILL_ROW_B if r_idx % 2 == 1 else FILL_ROW_A
+        bucket_total = float(pivot.loc[bucket].sum()) if bucket in pivot.index else 0
+
+        cell = ws.cell(row=row, column=1, value=bucket)
+        cell.font = FONT_BODY_BOLD
+        cell.fill = fill
+        cell.border = THIN_BORDER
+
+        cell = ws.cell(row=row, column=2, value=bucket_total)
+        cell.font = FONT_BODY_BOLD
+        cell.fill = fill
+        cell.border = THIN_BORDER
+        cell.number_format = '$#,##0'
+        cell.alignment = ALIGN_RIGHT
+
+        for p_idx, period in enumerate(periods, start=3):
+            val = float(pivot.loc[bucket, periods[p_idx - 3]]) if bucket in pivot.index else 0
+            cell = ws.cell(row=row, column=p_idx, value=val)
+            cell.font = FONT_BODY
+            cell.fill = _heat_fill(val)
+            cell.border = THIN_BORDER
+            cell.number_format = '$#,##0'
+            cell.alignment = ALIGN_RIGHT
+        row += 1
+
+    # Total row
+    ws.cell(row=row, column=1, value="TOTAL").font = FONT_BODY_BOLD
+    ws.cell(row=row, column=1).fill = FILL_LIGHT
+    total_cell = ws.cell(row=row, column=2, value=total_spend)
+    total_cell.font = FONT_BODY_BOLD
+    total_cell.fill = FILL_LIGHT
+    total_cell.number_format = '$#,##0'
+    total_cell.alignment = ALIGN_RIGHT
+    for p_idx, period in enumerate(periods, start=3):
+        pval = float(df[df["_month"] == periods[p_idx - 3]]["_spend"].sum())
+        cell = ws.cell(row=row, column=p_idx, value=pval)
+        cell.font = FONT_BODY_BOLD
+        cell.fill = FILL_LIGHT
+        cell.number_format = '$#,##0'
+        cell.alignment = ALIGN_RIGHT
+
+    _set_col_widths(ws, {1: 32, 2: 18})
+    for i in range(3, MAX_COL + 1):
+        ws.column_dimensions[get_column_letter(i)].width = 14
+
+    _freeze_and_filter(ws, HEADER_ROW + 1, MAX_COL)
+    ws.sheet_properties.tabColor = GREEN
+
+
+def _build_single_txn_vendors(wb, df, total_spend, vendor_col):
+    """Sheet 6: Single-Txn Vendors – tail spend."""
+    ws = wb.create_sheet("Single-Txn Vendors")
+
+    headers = ["Master Bucket", "Vendor", "Spend", "Description",
+               "% of Bucket", "Consolidation Opportunity"]
+    MAX_COL = len(headers)
+    _write_title_banner(ws, "Single-Transaction Vendors",
+                        "One-off vendors that may represent unmanaged tail spend or consolidation candidates",
+                        MAX_COL)
+
+    HEADER_ROW = 4
+    _write_header_row(ws, HEADER_ROW, headers)
+
+    if not vendor_col:
+        ws.cell(row=HEADER_ROW + 1, column=1, value="No vendor column found.").font = FONT_MUTED
+        ws.sheet_properties.tabColor = AMBER
+        return
+
+    # Find description column
+    desc_col = None
+    for c in ["Description", "Item Description", "Line Description",
+              "Short Description", "PO Description"]:
+        if c in df.columns:
+            desc_col = c
             break
 
-    if method_col:
-        method_norm = df[method_col].astype(str).str.strip().str.lower()
-        on_method = method_norm.isin(ON_CONTRACT_METHODS)
-    else:
-        on_method = pd.Series([False] * len(df))
+    txn_counts = df.groupby(vendor_col).size()
+    single_vendors = set(txn_counts[txn_counts == 1].index)
 
-    return has_contract_num | on_method
+    sdf = df[df[vendor_col].isin(single_vendors)].copy()
 
+    bucket_spend = df.groupby("master_bucket")["_spend"].sum().to_dict()
+
+    rows_data = []
+    for _, r in sdf.sort_values("_spend", ascending=False).iterrows():
+        bucket = r["master_bucket"]
+        vname = str(r[vendor_col])
+        vname = _ILLEGAL_XML_RE.sub("", vname)
+        spend = r["_spend"]
+        desc = str(r.get(desc_col, "")) if desc_col else ""
+        desc = _ILLEGAL_XML_RE.sub("", desc) if desc else ""
+        bspend = bucket_spend.get(bucket, 0)
+        pct_bucket = spend / bspend if bspend else 0
+
+        # Simple opportunity flag
+        if spend >= 10000:
+            opp = "Review – significant one-off spend"
+        elif spend >= 2500:
+            opp = "Consider blanket PO or p-card"
+        else:
+            opp = "Low-dollar tail spend"
+
+        rows_data.append([bucket, vname, spend, desc[:100], pct_bucket, opp])
+
+    _write_data_rows(ws, HEADER_ROW + 1, rows_data,
+                     currency_cols={3}, pct_cols={5})
+
+    # Summary stats at top-right
+    total_single = len(single_vendors)
+    total_vendors = df[vendor_col].nunique()
+    single_spend = sdf["_spend"].sum()
+
+    stats_col = MAX_COL + 2
+    ws.cell(row=4, column=stats_col, value="Tail Spend Summary").font = FONT_H3
+    stats = [
+        ("Single-txn vendors", f"{total_single:,}"),
+        ("Total vendors", f"{total_vendors:,}"),
+        ("Single-txn % of vendors", f"{total_single / total_vendors * 100:.1f}%" if total_vendors else "0%"),
+        ("Single-txn spend", _fmt_currency(single_spend)),
+        ("% of total spend", f"{single_spend / total_spend * 100:.1f}%" if total_spend else "0%"),
+    ]
+    for i, (label, val) in enumerate(stats, start=5):
+        ws.cell(row=i, column=stats_col, value=label).font = FONT_BODY_BOLD
+        ws.cell(row=i, column=stats_col + 1, value=val).font = FONT_BODY
+
+    _set_col_widths(ws, {1: 32, 2: 40, 3: 16, 4: 50, 5: 14, 6: 36,
+                         stats_col: 24, stats_col + 1: 18})
+    _freeze_and_filter(ws, HEADER_ROW + 1, MAX_COL)
+    ws.sheet_properties.tabColor = AMBER
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     inp = sys.argv[1] if len(sys.argv) > 1 else os.path.join(script_dir, "categorized_output.csv")
     outp = sys.argv[2] if len(sys.argv) > 2 else os.path.join(script_dir, "Procurement_Detail_Breakdown.xlsx")
 
+    print(f"Reading: {inp}")
     df = _read_csv_robust(inp)
 
     if "Extended Price" not in df.columns:
         raise ValueError("Expected 'Extended Price' column in categorized file.")
     if "master_bucket" not in df.columns:
-        raise ValueError("Expected 'master_bucket' in categorized file. Re-run run_categorization.py first.")
+        raise ValueError("Expected 'master_bucket' in categorized file. Re-run categorization first.")
 
-    df["_spend"] = _safe_num_series(df["Extended Price"])
-
+    df["_spend"] = _safe_num(df["Extended Price"])
     dates = _coerce_date(df)
-    df["_month"], df["_fy"] = _infer_month_fy(dates)
-
-    df["_on_contract"] = _infer_on_contract(df)
-
-    total_spend = float(df["_spend"].sum())
-    total_rows = int(len(df))
-    on_contract_spend = float(df.loc[df["_on_contract"], "_spend"].sum())
-    on_contract_pct = (on_contract_spend / total_spend * 100) if total_spend else 0.0
-
-    by_bucket = (
-        df.groupby("master_bucket")["_spend"]
-        .sum()
-        .sort_values(ascending=False)
-        .reset_index()
-        .rename(columns={"_spend": "total_spend"})
+    df["_month"], df["_fy"] = (
+        dates.dt.to_period("M").astype(str),
+        dates.dt.year.where(dates.dt.month < 7, dates.dt.year + 1),
     )
-    by_bucket["pct_of_total"] = by_bucket["total_spend"].apply(lambda x: (x / total_spend * 100) if total_spend else 0)
 
-    # FY-end logic: prefer Apr/May/Jun if present, else last 3 periods
-    period_cols = sorted(df["_month"].dropna().unique().tolist())
-    fy_end_suffixes = ("-04", "-05", "-06")
-    last3 = [p for p in period_cols if str(p).endswith(fy_end_suffixes)]
-    if not last3:
-        last3 = period_cols[-3:] if len(period_cols) >= 3 else period_cols
+    vendor_col = _find_vendor_col(df)
+    total_spend = float(df["_spend"].sum())
+    total_rows = len(df)
+    generated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    df["_is_fy_end_month"] = df["_month"].isin(last3)
-    fy_end_spend = float(df.loc[df["_is_fy_end_month"], "_spend"].sum())
-    fy_end_pct = (fy_end_spend / total_spend * 100) if total_spend else 0.0
+    print(f"Rows: {total_rows:,}  |  Spend: {_fmt_currency(total_spend)}  |  Vendors: {df[vendor_col].nunique() if vendor_col else 'N/A'}")
 
-    vendor_col = None
-    for c in ["Vendor Name", "Vendor", "Supplier", "Primary Second Party"]:
-        if c in df.columns:
-            vendor_col = c
-            break
+    # Build workbook with openpyxl directly for full formatting control
+    from openpyxl import Workbook
+    wb = Workbook()
+    # Remove default sheet
+    wb.remove(wb.active)
 
-    if vendor_col:
-        top_vendors = (
-            df.groupby(vendor_col)["_spend"]
-            .agg(total_spend="sum", line_count="size")
-            .sort_values("total_spend", ascending=False)
-            .reset_index()
-            .rename(columns={vendor_col: "Vendor"})
-            .head(500)
-        )
-        top_vendors["pct_of_total"] = top_vendors["total_spend"].apply(
-            lambda x: (x / total_spend * 100) if total_spend else 0)
-    else:
-        top_vendors = pd.DataFrame(columns=["Vendor", "total_spend", "line_count", "pct_of_total"])
+    print("  Building: How This Was Built")
+    _build_methodology(wb, df, total_spend, total_rows, vendor_col, generated)
 
-    if "services_review_flag" in df.columns:
-        srvq = df[df["services_review_flag"].fillna(False).astype(bool)].copy()
-    else:
-        srvq = df.iloc[0:0].copy()
+    print("  Building: Bucket Hierarchy")
+    _build_bucket_hierarchy(wb, df, total_spend)
 
-    unc = df[df["master_bucket"].fillna("") == "Uncategorized"].copy()
+    print("  Building: Top 30 Vendors")
+    _build_top_vendors(wb, df, total_spend, vendor_col)
 
-    with pd.ExcelWriter(outp, engine="openpyxl") as writer:
-        summary = pd.DataFrame(
-            [
-                ["Rows", total_rows],
-                ["Total Spend", total_spend],
-                ["On-Contract Spend (inferred)", on_contract_spend],
-                ["On-Contract %", on_contract_pct],
-                ["FY-End Months Used", ", ".join(map(str, last3))],
-                ["FY-End Spend", fy_end_spend],
-                ["FY-End %", fy_end_pct],
-                ["Generated", datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
-            ],
-            columns=["Metric", "Value"],
-        )
-        summary.to_excel(writer, sheet_name="Summary", index=False)
-        by_bucket.to_excel(writer, sheet_name="Spend by Bucket", index=False)
-        _sanitize_for_excel(top_vendors).to_excel(writer, sheet_name="Top Vendors", index=False)
-        _sanitize_for_excel(srvq).to_excel(writer, sheet_name="Services Review", index=False)
-        _sanitize_for_excel(unc).to_excel(writer, sheet_name="Uncategorized", index=False)
+    print("  Building: Vendor Concentration")
+    _build_vendor_concentration(wb, df, total_spend, vendor_col)
 
+    print("  Building: Spend by Period")
+    _build_spend_by_period(wb, df, total_spend)
+
+    print("  Building: Single-Txn Vendors")
+    _build_single_txn_vendors(wb, df, total_spend, vendor_col)
+
+    print(f"Saving: {outp}")
+    wb.save(outp)
     print(f"Written: {outp}")
 
 
