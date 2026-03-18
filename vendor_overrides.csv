@@ -1,0 +1,19 @@
+vendor_contains,override_type,MajorCategory,Subcategory,required_keywords,exclude_keywords,confidence,reason
+dominion,hard,Facilities & Construction,Utilities,,,98,Regional utility provider
+aramark,hard,Hospitality & Events,Catering / Dining,,,98,Master food service provider
+sodexo,hard,Hospitality & Events,Catering / Dining,,,98,Master food service provider
+ssc,hard,Facilities & Construction,Facilities Services,,,95,Custodial/facilities services
+abm,hard,Facilities & Construction,Facilities Services,,,95,Facilities services
+united healthcare,hard,Services,Insurance / Benefits Administration,,,95,Insurance/benefits admin
+uhc,hard,Services,Insurance / Benefits Administration,,,95,Insurance/benefits admin
+anthem,hard,Services,Insurance / Benefits Administration,,,95,Insurance/benefits admin
+aetna,hard,Services,Insurance / Benefits Administration,,,95,Insurance/benefits admin
+noodle,hard,Services,Managed Services (Non-IT),,,95,OPM/enrollment services
+2u,hard,Services,Managed Services (Non-IT),,,95,OPM/enrollment services
+fedex,hard,Logistics & Transportation,Freight & Delivery,,,95,Carrier
+ups,hard,Logistics & Transportation,Freight & Delivery,,,95,Carrier
+dhl,hard,Logistics & Transportation,Freight & Delivery,,,95,Carrier
+grainger,soft,Facilities & Construction,MRO Supplies & Parts,filter;belt;bearing;valve;gasket;lubricant;hvac;fastener;bolt;glove;ppe,,85,Industrial supplier (requires product keywords)
+staples,soft,Operations & General Supplies,Office Supplies,paper;pen;notebook;toner;cartridge;folder;label,,85,Office supplier (requires product keywords)
+cdw,soft,Technology,IT Hardware,laptop;monitor;docking;desktop;server;switch;router,,88,IT reseller (requires hardware keywords)
+cdw,soft,Technology,Software & SaaS,license;subscription;renewal;saas,,88,IT reseller (requires software keywords)

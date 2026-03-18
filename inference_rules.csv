@@ -1,0 +1,13 @@
+rule_id,priority,Subcategory,include_keywords,exclude_keywords,vendor_keywords,unspsc_prefixes,commodity_prefixes,account_prefixes,min_score,reason
+OUTSCOPE_PAY,100,Out of Scope – Payments/Fees/Transfers,stipend;scholarship;refund;reimbursement;grant;award payment;tax;penalty;fine;interest;late fee;pass-through,,,,,,60,Out-of-scope payments/fees
+OUTSCOPE_INT,99,Out of Scope – Internal/Recharge,recharge;internal billing;interdepartmental;service center;allocat;chargeback,,,,,,60,Internal/recharge
+NEEDSREVIEW_ADMIN,98,Needs Review – Admin/Vague,declining balance;blanket po;total amount;per quote;see attached;tbd;miscellaneous,,,,,,50,Vague/admin description
+FREIGHT_CORE,97,Freight & Delivery,freight;shipping;delivery;handling;courier,,ups;fedex;dhl,7810;7813,,,65,Freight keywords / carrier
+UTIL_CORE,96,Utilities,electric;power;water;sewer;gas;utility,,dominion;energy;water authority,,,,70,Utilities
+JAN_SUP,95,Janitorial & Cleaning,disinfectant;bleach;sanitizer;soap;paper towel;toilet paper;trash bag;liner;mop;cleaner;degreaser,,unis;waxie,4712;4713,,62,70,Janitorial supplies
+FURN_CORE,95,Furniture & Space,desk;chair;workstation;panel system;credenza;bookcase;conference table;seating,repair;service,steelcase;haworth;herman miller,5610;5611;5612;5613;5614,EQUIP,70;71;72,75,Furniture keywords
+PSEC_TECH,95,Physical Security Technology,camera;cctv;nvr;dvr;badge reader;card reader;access control;door controller;mag lock;intercom;turnstile;security panel,guard;patrol;security officer;watchman;post coverage,genetec;avigilon;axis;lenel;verkada;brivo,4616;4617,EQUIP,70;71;72,75,Security hardware
+SEC_SERV,92,Security Services,security guard;guard services;security officer;patrol;post coverage;watchman;event security,camera;cctv;nvr;dvr;badge reader;access control;panel;hardware;install;installation,allied universal;securitas;g4s,9211;9212,,60;61;62,75,Guard services
+IT_STAFF,94,IT Professional Staffing,developer;software engineer;data engineer;cloud engineer;devops;sysadmin;help desk;service desk;network engineer;security engineer;it contractor;it staffing,license;subscription;saas,teksystems;insight global;apex systems;randstad;robert half,8111;8112;8113,,60;61;62,75,IT staffing keywords
+TRAINING,90,Training / Conferences,registration;conference;training;workshop;seminar;webinar,license;subscription;saas,,,,60;61;62,70,Training fees
+PUBS,85,Publications / Subscriptions (Non-Software),journal;publication;subscription;ebsco;database access,saas;software;license,ebsco,,,62;63,65,Publications
