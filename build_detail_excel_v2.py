@@ -16,9 +16,26 @@ Usage:
 """
 
 import os
+import re
 import sys
 from datetime import datetime
 import pandas as pd
+
+
+# Illegal XML 1.0 characters that openpyxl rejects
+_ILLEGAL_XML_RE = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]"
+)
+
+
+def _sanitize_for_excel(df: pd.DataFrame) -> pd.DataFrame:
+    """Strip characters that are illegal in Excel/XML cells."""
+    obj_cols = df.select_dtypes(include=["object"]).columns
+    for col in obj_cols:
+        df[col] = df[col].apply(
+            lambda v: _ILLEGAL_XML_RE.sub("", v) if isinstance(v, str) else v
+        )
+    return df
 
 
 def _safe_num_series(s: pd.Series) -> pd.Series:
@@ -176,9 +193,9 @@ def main():
         )
         summary.to_excel(writer, sheet_name="Summary", index=False)
         by_bucket.to_excel(writer, sheet_name="Spend by Bucket", index=False)
-        top_vendors.to_excel(writer, sheet_name="Top Vendors", index=False)
-        srvq.to_excel(writer, sheet_name="Services Review", index=False)
-        unc.to_excel(writer, sheet_name="Uncategorized", index=False)
+        _sanitize_for_excel(top_vendors).to_excel(writer, sheet_name="Top Vendors", index=False)
+        _sanitize_for_excel(srvq).to_excel(writer, sheet_name="Services Review", index=False)
+        _sanitize_for_excel(unc).to_excel(writer, sheet_name="Uncategorized", index=False)
 
     print(f"Written: {outp}")
 
@@ -187,7 +204,9 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"\nERROR: {e}")
+        import traceback
+        print(f"\nERROR: {e}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         if sys.stdin.isatty():
             input("\nPress Enter to exit...")
         sys.exit(1)

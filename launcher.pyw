@@ -315,15 +315,16 @@ class App(tk.Tk):
             if excel_result.stdout:
                 self._log(excel_result.stdout.strip())
             if excel_result.returncode != 0:
-                err_msg = excel_result.stderr.strip() if excel_result.stderr else "unknown error"
-                self._log(f"Excel generation failed: {err_msg}", "err")
+                if excel_result.stderr:
+                    for line in excel_result.stderr.strip().splitlines():
+                        self._log(line, "err")
+                else:
+                    self._log(f"Excel generation failed with exit code {excel_result.returncode}", "err")
+                self._log("Categorization complete. CSV saved but Excel report failed.", "warn")
             else:
                 self._log(f"Excel saved: {xlsx_path}", "ok")
-            self._log("─" * 60, "hdr")
-            if excel_result.returncode == 0:
                 self._log("Done! Open Procurement_Detail_Breakdown.xlsx to view results.", "ok")
-            else:
-                self._log("Categorization complete. CSV saved but Excel report failed.", "warn")
+            self._log("─" * 60, "hdr")
 
         except Exception as e:
             import traceback
@@ -369,8 +370,11 @@ class App(tk.Tk):
             if result.stdout:
                 self._log(result.stdout.strip())
             if result.returncode != 0:
-                err_msg = result.stderr.strip() if result.stderr else "unknown error"
-                self._log(f"Excel generation failed: {err_msg}", "err")
+                if result.stderr:
+                    for line in result.stderr.strip().splitlines():
+                        self._log(line, "err")
+                else:
+                    self._log(f"Excel generation failed with exit code {result.returncode}", "err")
             else:
                 self._log(f"Excel saved: {xlsx_path}", "ok")
                 self._log("Done! Open Procurement_Detail_Breakdown.xlsx to view results.", "ok")
