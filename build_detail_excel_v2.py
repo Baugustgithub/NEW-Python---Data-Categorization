@@ -472,7 +472,8 @@ def _build_vendor_concentration(wb, df, total_spend, vendor_col):
 
     headers = ["Master Bucket", "Bucket Spend", "Unique Vendors",
                "Top-1 Share", "Top-3 Share", "Top-5 Share", "Top-10 Share",
-               "Single-Txn Vendors", "Single-Txn % of Vendors", "Concentration Flag"]
+               "Single-Txn Vendors", "Single-Txn % of Vendors",
+               "Single-Txn Spend", "Single-Txn % of Bucket", "Concentration Flag"]
     MAX_COL = len(headers)
     _write_title_banner(ws, "Vendor Concentration",
                         "Supplier dependency risk and consolidation opportunities by category",
@@ -512,8 +513,13 @@ def _build_vendor_concentration(wb, df, total_spend, vendor_col):
 
         # Single-transaction vendors
         txn_counts = bdf.groupby(vendor_col).size()
-        single_txn = int((txn_counts == 1).sum())
+        single_vendors_set = set(txn_counts[txn_counts == 1].index)
+        single_txn = len(single_vendors_set)
         single_pct = single_txn / unique_vendors if unique_vendors else 0
+
+        # Single-txn vendor spend
+        single_spend = float(bdf[bdf[vendor_col].isin(single_vendors_set)]["_spend"].sum())
+        single_spend_pct = single_spend / bucket_spend if bucket_spend else 0
 
         # Concentration flag
         if top1 >= 0.50:
@@ -528,7 +534,7 @@ def _build_vendor_concentration(wb, df, total_spend, vendor_col):
         rows_data.append([
             bucket, bucket_spend, unique_vendors,
             top1, top3, top5, top10,
-            single_txn, single_pct, flag,
+            single_txn, single_pct, single_spend, single_spend_pct, flag,
         ])
 
     row = HEADER_ROW + 1
@@ -539,21 +545,17 @@ def _build_vendor_concentration(wb, df, total_spend, vendor_col):
             cell.font = FONT_BODY
             cell.fill = fill
             cell.border = THIN_BORDER
-            if c_idx == 2:
+            if c_idx in (2, 10):  # Bucket Spend, Single-Txn Spend
                 cell.number_format = '$#,##0'
                 cell.alignment = ALIGN_RIGHT
-            elif c_idx == 3:
+            elif c_idx in (3, 8):  # Unique Vendors, Single-Txn Vendors
                 cell.number_format = '#,##0'
                 cell.alignment = ALIGN_RIGHT
-            elif c_idx in (4, 5, 6, 7, 9):
+            elif c_idx in (4, 5, 6, 7, 9, 11):  # all percentage columns
                 cell.number_format = '0.0%'
                 cell.alignment = ALIGN_RIGHT
-            elif c_idx == 8:
-                cell.number_format = '#,##0'
-                cell.alignment = ALIGN_RIGHT
-            elif c_idx == 10:
+            elif c_idx == 12:  # Concentration Flag
                 cell.alignment = ALIGN_LEFT
-                # Color-code the flag
                 flag_val = str(val)
                 if flag_val.startswith("High"):
                     cell.font = Font(name="Calibri", size=10, bold=True, color=RED)
@@ -566,7 +568,7 @@ def _build_vendor_concentration(wb, df, total_spend, vendor_col):
         row += 1
 
     _set_col_widths(ws, {1: 32, 2: 18, 3: 16, 4: 12, 5: 12, 6: 12, 7: 12,
-                         8: 18, 9: 20, 10: 34})
+                         8: 18, 9: 20, 10: 18, 11: 20, 12: 34})
     _freeze_and_filter(ws, HEADER_ROW + 1, MAX_COL)
     ws.sheet_properties.tabColor = RED
 
@@ -576,7 +578,7 @@ def _build_spend_by_period(wb, df, total_spend):
     ws = wb.create_sheet("Spend by Period")
 
     periods = sorted(df["_month"].dropna().unique().tolist())
-    headers = ["Master Bucket", "Total Spend"] + [str(p) for p in periods]
+    headers = ["Master Bucket", "Total Spend", "Active Periods"] + [str(p) for p in periods]
     MAX_COL = len(headers)
     _write_title_banner(ws, "Spend by Period",
                         "Monthly spend by category – darker shading indicates higher relative spend",
@@ -617,10 +619,15 @@ def _build_spend_by_period(wb, df, total_spend):
         else:
             return PatternFill("solid", fgColor="B4C6E7")
 
+    PERIOD_START = 4  # period columns start at column 4
+
     row = HEADER_ROW + 1
     for r_idx, bucket in enumerate(bucket_order):
         fill = FILL_ROW_B if r_idx % 2 == 1 else FILL_ROW_A
         bucket_total = float(pivot.loc[bucket].sum()) if bucket in pivot.index else 0
+
+        # Count active (non-zero) periods for this bucket
+        active = int((pivot.loc[bucket] > 0).sum()) if bucket in pivot.index else 0
 
         cell = ws.cell(row=row, column=1, value=bucket)
         cell.font = FONT_BODY_BOLD
@@ -634,9 +641,17 @@ def _build_spend_by_period(wb, df, total_spend):
         cell.number_format = '$#,##0'
         cell.alignment = ALIGN_RIGHT
 
-        for p_idx, period in enumerate(periods, start=3):
-            val = float(pivot.loc[bucket, periods[p_idx - 3]]) if bucket in pivot.index else 0
-            cell = ws.cell(row=row, column=p_idx, value=val)
+        cell = ws.cell(row=row, column=3, value=active)
+        cell.font = FONT_BODY
+        cell.fill = fill
+        cell.border = THIN_BORDER
+        cell.number_format = '#,##0'
+        cell.alignment = ALIGN_CENTER
+
+        for p_idx, period in enumerate(periods):
+            col = PERIOD_START + p_idx
+            val = float(pivot.loc[bucket, period]) if bucket in pivot.index else 0
+            cell = ws.cell(row=row, column=col, value=val)
             cell.font = FONT_BODY
             cell.fill = _heat_fill(val)
             cell.border = THIN_BORDER
@@ -652,16 +667,20 @@ def _build_spend_by_period(wb, df, total_spend):
     total_cell.fill = FILL_LIGHT
     total_cell.number_format = '$#,##0'
     total_cell.alignment = ALIGN_RIGHT
-    for p_idx, period in enumerate(periods, start=3):
-        pval = float(df[df["_month"] == periods[p_idx - 3]]["_spend"].sum())
-        cell = ws.cell(row=row, column=p_idx, value=pval)
+    ws.cell(row=row, column=3, value=len(periods)).font = FONT_BODY_BOLD
+    ws.cell(row=row, column=3).fill = FILL_LIGHT
+    ws.cell(row=row, column=3).alignment = ALIGN_CENTER
+    for p_idx, period in enumerate(periods):
+        col = PERIOD_START + p_idx
+        pval = float(df[df["_month"] == period]["_spend"].sum())
+        cell = ws.cell(row=row, column=col, value=pval)
         cell.font = FONT_BODY_BOLD
         cell.fill = FILL_LIGHT
         cell.number_format = '$#,##0'
         cell.alignment = ALIGN_RIGHT
 
-    _set_col_widths(ws, {1: 32, 2: 18})
-    for i in range(3, MAX_COL + 1):
+    _set_col_widths(ws, {1: 32, 2: 18, 3: 15})
+    for i in range(PERIOD_START, MAX_COL + 1):
         ws.column_dimensions[get_column_letter(i)].width = 14
 
     _freeze_and_filter(ws, HEADER_ROW + 1, MAX_COL)
