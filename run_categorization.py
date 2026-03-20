@@ -88,6 +88,8 @@ if out_dir:
     os.makedirs(out_dir, exist_ok=True)
 
 out.to_csv(output_file, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_ALL)
+# Write pickle for reliable Excel builder hand-off (no CSV parsing issues)
+out.to_pickle(output_file.replace(".csv", ".pkl"))
 print(f"Written to: {output_file}")
 
 # ── Bucket summary ─────────────────────────────────────────────────────────────

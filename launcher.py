@@ -140,6 +140,8 @@ def run_pipeline(input_path, output_dir, use_categorized_output=None, skip_aggre
             results = categorize_dataframe(combined)
             results.to_csv(categorized_file, index=False, encoding="utf-8-sig",
                            quoting=csv.QUOTE_ALL)
+            # Write pickle for reliable Excel builder hand-off (no CSV parsing issues)
+            results.to_pickle(categorized_file.replace(".csv", ".pkl"))
             print(f"  Saved categorized output to: {categorized_file}")
 
             # Print summary

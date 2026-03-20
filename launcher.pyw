@@ -302,6 +302,10 @@ class App(tk.Tk):
                            quoting=csv.QUOTE_ALL)
             self._log(f"CSV saved: {csv_path}", "ok")
 
+            # Write pickle for reliable Excel builder hand-off (no CSV parsing issues)
+            pkl_path = csv_path.replace(".csv", ".pkl")
+            result.to_pickle(pkl_path)
+
             # ── Write Excel ─────────────────────────────────────────────────
             xlsx_path = os.path.join(out_dir, "Procurement_Detail_Breakdown.xlsx")
             self._log("Building Excel report…")

@@ -105,6 +105,16 @@ def _safe_num(s: pd.Series) -> pd.Series:
 
 
 def _read_csv_robust(path: str) -> pd.DataFrame:
+    # Prefer pickle sidecar — avoids all CSV quoting/parsing issues
+    pkl_path = path.replace(".csv", ".pkl")
+    if os.path.exists(pkl_path):
+        try:
+            df = pd.read_pickle(pkl_path)
+            print(f"  (loaded from pickle: {os.path.basename(pkl_path)})")
+            return df
+        except Exception:
+            pass  # fall through to CSV
+
     for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
             return pd.read_csv(path, encoding=enc,
