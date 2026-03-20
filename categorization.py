@@ -786,15 +786,15 @@ def categorize_row(row: dict) -> dict:
         if kw in vendor:
             return _r(m, l2, l3, 2, hit, 0.9)
 
-    # Pass 3: category level 1 metadata
-    for kw, (m, l2, l3) in CATEGORY_L1_MAP.items():
-        if kw in cat1:
-            return _r(m, l2, l3, 3, f"cat1:{kw[:20]}", 0.7)
-
-    # Pass 4: keyword / regex
+    # Pass 3: keyword / regex  (promoted – more granular than Category L1)
     for m, l2, l3, pattern, hit in _COMPILED:
         if pattern.search(scan_text):
-            return _r(m, l2, l3, 4, hit, 0.5)
+            return _r(m, l2, l3, 3, hit, 0.7)
+
+    # Pass 4: category level 1 metadata  (demoted – broad/generic signal)
+    for kw, (m, l2, l3) in CATEGORY_L1_MAP.items():
+        if kw in cat1:
+            return _r(m, l2, l3, 4, f"cat1:{kw[:20]}", 0.6)
 
     # Pass 5: account-family fallback
     for acct in account.replace("|", " ").split():
@@ -832,7 +832,7 @@ def confidence_label(score):
 
 def rule_pass_label(n):
     return {0:"Vendor Hard Override", 1:"Commodity Code Crosswalk", 2:"Vendor Always-List",
-            3:"Category Metadata", 4:"Keyword / Regex", 5:"Account-Family Fallback"}.get(n, "Unknown")
+            3:"Keyword / Regex", 4:"Category Metadata", 5:"Account-Family Fallback"}.get(n, "Unknown")
 
 def categorize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # Drop any pre-existing categorization columns to avoid duplicates
