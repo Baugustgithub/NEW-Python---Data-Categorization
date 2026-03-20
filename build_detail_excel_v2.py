@@ -115,37 +115,36 @@ def _read_csv_robust(path: str) -> pd.DataFrame:
     if pkl_path and os.path.exists(pkl_path):
         try:
             df = pd.read_pickle(pkl_path)
+            # Drop phantom columns if present in pickle too
+            phantom = [c for c in df.columns if str(c).startswith("Unnamed:")]
+            if phantom:
+                df = df.drop(columns=phantom)
             print(f"  (loaded from pickle: {os.path.basename(pkl_path)}, "
                   f"{len(df):,} rows x {len(df.columns)} cols)")
             return df
         except Exception as e:
             print(f"  WARNING: pickle load failed ({e}), falling back to CSV")
 
-    # CSV fallback — sniff the real header to cap column count
+    # CSV fallback — skip phantom columns during parse
     csv_path = path if path.endswith(".csv") else path.replace(".pkl", ".csv")
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"Neither pickle nor CSV found for: {path}")
 
-    # Read just the header line to determine expected column count
-    import csv as csv_mod
-    with open(csv_path, encoding="utf-8-sig", errors="replace") as f:
-        reader = csv_mod.reader(f)
-        header = next(reader)
-    n_cols = len(header)
-    print(f"  CSV header has {n_cols} columns, reading with names forced…")
-
+    _keep = lambda c: not str(c).startswith("Unnamed:")
     for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
-            return pd.read_csv(csv_path, encoding=enc, names=header,
-                               header=0, on_bad_lines="skip",
-                               low_memory=False, usecols=range(n_cols))
+            df = pd.read_csv(csv_path, encoding=enc, on_bad_lines="skip",
+                             low_memory=False, usecols=_keep)
+            print(f"  (loaded from CSV: {len(df):,} rows x {len(df.columns)} cols)")
+            return df
         except UnicodeDecodeError:
             continue
         except Exception:
             break
-    return pd.read_csv(csv_path, encoding="latin-1", names=header,
-                       header=0, on_bad_lines="skip",
-                       low_memory=False, usecols=range(n_cols))
+    df = pd.read_csv(csv_path, encoding="latin-1", on_bad_lines="skip",
+                     low_memory=False, usecols=_keep)
+    print(f"  (loaded from CSV: {len(df):,} rows x {len(df.columns)} cols)")
+    return df
 
 
 def _coerce_date(df: pd.DataFrame) -> pd.Series:

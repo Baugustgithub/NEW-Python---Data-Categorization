@@ -19,33 +19,26 @@ sys.path.insert(0, script_dir)
 
 
 def _read_source_csv(path: str):
-    """Read a source CSV, keeping only recognized columns.
+    """Read a source CSV, skipping phantom columns during parse.
 
     PO data CSVs have unescaped commas in description fields, so pandas
-    detects thousands of phantom columns.  We read normally, then
-    immediately drop any column whose name starts with 'Unnamed:' (the
-    pandas default for headerless phantom columns) to reclaim memory
-    before concat.
+    detects thousands of phantom columns named 'Unnamed: N'.  We use
+    usecols with a callable to reject them during parsing so they never
+    get allocated in memory.
     """
     import pandas as pd
 
+    # Only keep columns that are NOT auto-generated phantom names
+    _keep = lambda c: not str(c).startswith("Unnamed:")
+
     for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
-            df = pd.read_csv(path, encoding=enc, low_memory=False,
-                             on_bad_lines="skip")
-            break
+            return pd.read_csv(path, encoding=enc, low_memory=False,
+                               on_bad_lines="skip", usecols=_keep)
         except UnicodeDecodeError:
             continue
-    else:
-        df = pd.read_csv(path, encoding="latin-1", low_memory=False,
-                         on_bad_lines="skip")
-
-    # Drop phantom columns — they're named "Unnamed: 15", "Unnamed: 16", etc.
-    phantom = [c for c in df.columns if str(c).startswith("Unnamed:")]
-    if phantom:
-        df = df.drop(columns=phantom)
-
-    return df
+    return pd.read_csv(path, encoding="latin-1", low_memory=False,
+                       on_bad_lines="skip", usecols=_keep)
 
 
 # ── Colour palette ────────────────────────────────────────────────────────────

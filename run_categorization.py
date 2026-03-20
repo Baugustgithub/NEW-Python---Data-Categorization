@@ -46,21 +46,20 @@ for f in input_files:
         if ext in (".xlsx", ".xls"):
             dfs.append(pd.read_excel(f))
         else:
-            # CSV — read then drop phantom columns from misparse
+            # CSV — skip phantom columns during parse (usecols callable)
+            _keep = lambda c: not str(c).startswith("Unnamed:")
+            loaded = False
             for enc in ("utf-8-sig", "utf-8", "latin-1"):
                 try:
-                    df = pd.read_csv(f, encoding=enc, low_memory=False,
-                                     on_bad_lines="skip")
+                    dfs.append(pd.read_csv(f, encoding=enc, low_memory=False,
+                                           on_bad_lines="skip", usecols=_keep))
+                    loaded = True
                     break
                 except UnicodeDecodeError:
                     continue
-            else:
-                df = pd.read_csv(f, encoding="latin-1", low_memory=False,
-                                 on_bad_lines="skip")
-            phantom = [c for c in df.columns if str(c).startswith("Unnamed:")]
-            if phantom:
-                df = df.drop(columns=phantom)
-            dfs.append(df)
+            if not loaded:
+                dfs.append(pd.read_csv(f, encoding="latin-1", low_memory=False,
+                                       on_bad_lines="skip", usecols=_keep))
     except Exception as e:
         print(f"ERROR reading {os.path.basename(f)}: {e}")
         if sys.stdin.isatty():

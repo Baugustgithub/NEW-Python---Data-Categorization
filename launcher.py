@@ -56,30 +56,22 @@ def resolve_input_files(path):
 def read_file(filepath):
     """Read a CSV or Excel file into a DataFrame.
 
-    For CSVs, drops phantom 'Unnamed:' columns created by unescaped
-    commas in description fields.
+    For CSVs, uses usecols callable to skip phantom 'Unnamed:' columns
+    during parse so they never get allocated in memory.
     """
     ext = os.path.splitext(filepath)[1].lower()
     if ext in (".xlsx", ".xls"):
         return pd.read_excel(filepath)
 
+    _keep = lambda c: not str(c).startswith("Unnamed:")
     for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
-            df = pd.read_csv(filepath, encoding=enc, low_memory=False,
-                             on_bad_lines="skip")
-            break
+            return pd.read_csv(filepath, encoding=enc, low_memory=False,
+                               on_bad_lines="skip", usecols=_keep)
         except UnicodeDecodeError:
             continue
-    else:
-        df = pd.read_csv(filepath, encoding="latin-1", low_memory=False,
-                         on_bad_lines="skip")
-
-    # Drop phantom columns from misparse
-    phantom = [c for c in df.columns if str(c).startswith("Unnamed:")]
-    if phantom:
-        df = df.drop(columns=phantom)
-
-    return df
+    return pd.read_csv(filepath, encoding="latin-1", low_memory=False,
+                       on_bad_lines="skip", usecols=_keep)
 
 
 def validate_categorized_output(filepath):
