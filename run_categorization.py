@@ -46,11 +46,30 @@ for f in input_files:
         if ext in (".xlsx", ".xls"):
             dfs.append(pd.read_excel(f))
         else:
-            # CSV — try UTF-8 first, fall back to latin-1
-            try:
-                dfs.append(pd.read_csv(f, low_memory=False))
-            except UnicodeDecodeError:
-                dfs.append(pd.read_csv(f, low_memory=False, encoding="latin-1"))
+            # CSV — sniff header to cap columns (PO data has unescaped commas)
+            import csv as csv_mod
+            for enc in ("utf-8-sig", "utf-8", "latin-1"):
+                try:
+                    with open(f, encoding=enc, errors="replace", newline="") as fh:
+                        hdr = next(csv_mod.reader(fh))
+                    break
+                except Exception:
+                    continue
+            nc = len(hdr)
+            loaded = False
+            for enc in ("utf-8-sig", "utf-8", "latin-1"):
+                try:
+                    dfs.append(pd.read_csv(f, encoding=enc, low_memory=False,
+                                           usecols=range(nc), names=hdr, header=0,
+                                           on_bad_lines="skip"))
+                    loaded = True
+                    break
+                except UnicodeDecodeError:
+                    continue
+            if not loaded:
+                dfs.append(pd.read_csv(f, encoding="latin-1", low_memory=False,
+                                       usecols=range(nc), names=hdr, header=0,
+                                       on_bad_lines="skip"))
     except Exception as e:
         print(f"ERROR reading {os.path.basename(f)}: {e}")
         if sys.stdin.isatty():

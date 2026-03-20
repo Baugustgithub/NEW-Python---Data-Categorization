@@ -18,6 +18,40 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, script_dir)
 
 
+def _read_source_csv(path: str):
+    """Read a source CSV, capping columns to the header count.
+
+    PO data often has unescaped commas/quotes in description fields,
+    which makes pandas detect thousands of phantom columns.  We sniff
+    the true column count from the first line with Python's csv module
+    (which is more lenient) and force usecols so the C parser never
+    allocates memory for garbage columns.
+    """
+    import csv as csv_mod
+    import pandas as pd
+
+    # Sniff header — try utf-8-sig first (handles BOM), fall back
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            with open(path, encoding=enc, errors="replace", newline="") as fh:
+                header = next(csv_mod.reader(fh))
+            break
+        except Exception:
+            continue
+
+    n = len(header)
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            return pd.read_csv(path, encoding=enc, low_memory=False,
+                               usecols=range(n), names=header, header=0,
+                               on_bad_lines="skip")
+        except UnicodeDecodeError:
+            continue
+    return pd.read_csv(path, encoding="latin-1", low_memory=False,
+                       usecols=range(n), names=header, header=0,
+                       on_bad_lines="skip")
+
+
 # ── Colour palette ────────────────────────────────────────────────────────────
 BG       = "#1e1e2e"
 SURFACE  = "#2a2a3e"
@@ -260,11 +294,8 @@ class App(tk.Tk):
                     if ext in (".xlsx", ".xls"):
                         df = pd.read_excel(f)
                     else:
-                        try:
-                            df = pd.read_csv(f, low_memory=False)
-                        except UnicodeDecodeError:
-                            df = pd.read_csv(f, low_memory=False, encoding="latin-1")
-                    self._log(f"  → {len(df):,} rows", "ok")
+                        df = _read_source_csv(f)
+                    self._log(f"  → {len(df):,} rows, {len(df.columns)} cols", "ok")
                     dfs.append(df)
                 except Exception as e:
                     self._log(f"  ✗ Failed to read {os.path.basename(f)}: {e}", "err")
