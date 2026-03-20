@@ -4,12 +4,13 @@ build_detail_excel_v2.py
 Builds a procurement intelligence workbook from categorized_output.csv.
 
 Sheets:
-1) How This Was Built        – methodology & data summary
-2) Bucket Hierarchy          – 3-level spend taxonomy
-3) Top 30 Vendors            – largest vendors per bucket
-4) Vendor Concentration      – concentration risk metrics per bucket
-5) Spend by Period           – monthly spend heatmap by bucket
-6) Single-Txn Vendors        – tail-spend / one-off vendor list
+1) Executive Dashboard       – KPI cards, bar chart, pie chart, trend line
+2) How This Was Built        – methodology & data summary
+3) Bucket Hierarchy          – 3-level spend taxonomy
+4) Top 50 Vendors            – largest vendors per bucket
+5) Vendor Concentration      – concentration risk metrics per bucket
+6) Spend by Period           – monthly spend heatmap with data bars
+7) Single-Txn Vendors        – tail-spend / one-off vendor list
 
 Usage:
     py build_detail_excel_v2.py
@@ -24,6 +25,10 @@ from datetime import datetime
 import pandas as pd
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side, numbers
 from openpyxl.utils import get_column_letter
+from openpyxl.chart import BarChart, PieChart, LineChart, Reference
+from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.series import DataPoint
+from openpyxl.formatting.rule import DataBarRule, ColorScaleRule
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -205,6 +210,156 @@ def _freeze_and_filter(ws, freeze_row: int, max_col: int):
 
 
 # ── Sheet builders ───────────────────────────────────────────────────────────
+
+def _build_executive_dashboard(wb, df, total_spend, total_rows, vendor_col, generated):
+    """Sheet 1: Executive Dashboard – KPIs, bar chart, pie chart, trend line."""
+    ws = wb.create_sheet("Executive Dashboard")
+    MAX_COL = 14
+    _write_title_banner(ws, "Executive Dashboard",
+                        f"Procurement Intelligence Summary  |  Generated {generated}", MAX_COL)
+
+    # ── KPI Cards (row 4-5) ──────────────────────────────────────────────
+    vendor_count = df[vendor_col].nunique() if vendor_col else 0
+    bucket_count = df["master_bucket"].nunique()
+
+    # Single-txn vendor stats
+    single_count = 0
+    single_spend = 0.0
+    if vendor_col:
+        txn_counts = df.groupby(vendor_col).size()
+        single_vendors = set(txn_counts[txn_counts == 1].index)
+        single_count = len(single_vendors)
+        single_spend = float(df[df[vendor_col].isin(single_vendors)]["_spend"].sum())
+
+    avg_txn = total_spend / total_rows if total_rows else 0
+
+    kpis = [
+        ("Total Spend", _fmt_currency(total_spend)),
+        ("Transactions", f"{total_rows:,}"),
+        ("Unique Vendors", f"{vendor_count:,}"),
+        ("Categories", f"{bucket_count}"),
+        ("Avg Txn Size", _fmt_currency(avg_txn)),
+        ("Single-Txn Vendors", f"{single_count:,}"),
+        ("Tail Spend", _fmt_currency(single_spend)),
+    ]
+
+    for i, (label, value) in enumerate(kpis):
+        col = i * 2 + 1
+        # Label cell
+        cell = ws.cell(row=4, column=col, value=label)
+        cell.font = FONT_NOTE
+        cell.alignment = ALIGN_CENTER
+        ws.merge_cells(start_row=4, start_column=col, end_row=4, end_column=col + 1)
+        # Value cell
+        cell = ws.cell(row=5, column=col, value=value)
+        cell.font = Font(name="Calibri", size=14, bold=True, color=NAVY)
+        cell.alignment = ALIGN_CENTER
+        cell.fill = FILL_LIGHT
+        ws.merge_cells(start_row=5, start_column=col, end_row=5, end_column=col + 1)
+
+    ws.row_dimensions[4].height = 18
+    ws.row_dimensions[5].height = 30
+
+    # ── Chart data area (hidden, rows 30+) ───────────────────────────────
+    DATA_START = 30
+
+    # -- Spend by Bucket (for bar chart) --
+    bucket_spend = (
+        df.groupby("master_bucket")["_spend"].sum()
+        .sort_values(ascending=False).head(12)
+    )
+    ws.cell(row=DATA_START, column=1, value="Category")
+    ws.cell(row=DATA_START, column=2, value="Spend")
+    for i, (bname, bval) in enumerate(bucket_spend.items()):
+        ws.cell(row=DATA_START + 1 + i, column=1, value=str(bname))
+        ws.cell(row=DATA_START + 1 + i, column=2, value=float(bval))
+    bar_end = DATA_START + len(bucket_spend)
+
+    # Bar chart: Spend by Category
+    bar_chart = BarChart()
+    bar_chart.type = "col"
+    bar_chart.title = "Spend by Category"
+    bar_chart.y_axis.title = "Spend ($)"
+    bar_chart.y_axis.numFmt = '$#,##0'
+    bar_chart.x_axis.title = None
+    bar_chart.style = 10
+    bar_chart.width = 28
+    bar_chart.height = 14
+    bar_data = Reference(ws, min_col=2, min_row=DATA_START, max_row=bar_end)
+    bar_cats = Reference(ws, min_col=1, min_row=DATA_START + 1, max_row=bar_end)
+    bar_chart.add_data(bar_data, titles_from_data=True)
+    bar_chart.set_categories(bar_cats)
+    bar_chart.legend = None
+    if bar_chart.series:
+        bar_chart.series[0].graphicalProperties.solidFill = ACCENT
+    ws.add_chart(bar_chart, "A7")
+
+    # -- Top 10 Vendors (for pie chart) --
+    PIE_COL = 4
+    if vendor_col:
+        top_vendors = (
+            df.groupby(vendor_col)["_spend"].sum()
+            .sort_values(ascending=False).head(10)
+        )
+        ws.cell(row=DATA_START, column=PIE_COL, value="Vendor")
+        ws.cell(row=DATA_START, column=PIE_COL + 1, value="Spend")
+        for i, (vname, vval) in enumerate(top_vendors.items()):
+            clean_name = _ILLEGAL_XML_RE.sub("", str(vname))
+            ws.cell(row=DATA_START + 1 + i, column=PIE_COL, value=clean_name)
+            ws.cell(row=DATA_START + 1 + i, column=PIE_COL + 1, value=float(vval))
+        pie_end = DATA_START + len(top_vendors)
+
+        pie_chart = PieChart()
+        pie_chart.title = "Top 10 Vendors by Spend"
+        pie_chart.style = 10
+        pie_chart.width = 18
+        pie_chart.height = 14
+        pie_data = Reference(ws, min_col=PIE_COL + 1, min_row=DATA_START,
+                             max_row=pie_end)
+        pie_cats = Reference(ws, min_col=PIE_COL, min_row=DATA_START + 1,
+                             max_row=pie_end)
+        pie_chart.add_data(pie_data, titles_from_data=True)
+        pie_chart.set_categories(pie_cats)
+        pie_chart.dataLabels = DataLabelList()
+        pie_chart.dataLabels.showPercent = True
+        pie_chart.dataLabels.showVal = False
+        ws.add_chart(pie_chart, "H7")
+
+    # -- Monthly Trend (for line chart) --
+    TREND_COL = 7
+    periods = sorted(df["_month"].dropna().unique().tolist())
+    if periods:
+        ws.cell(row=DATA_START, column=TREND_COL, value="Period")
+        ws.cell(row=DATA_START, column=TREND_COL + 1, value="Spend")
+        for i, p in enumerate(periods):
+            ws.cell(row=DATA_START + 1 + i, column=TREND_COL, value=str(p))
+            ws.cell(row=DATA_START + 1 + i, column=TREND_COL + 1,
+                    value=float(df[df["_month"] == p]["_spend"].sum()))
+        trend_end = DATA_START + len(periods)
+
+        line_chart = LineChart()
+        line_chart.title = "Monthly Spend Trend"
+        line_chart.y_axis.title = "Spend ($)"
+        line_chart.y_axis.numFmt = '$#,##0'
+        line_chart.style = 10
+        line_chart.width = 28
+        line_chart.height = 12
+        line_data = Reference(ws, min_col=TREND_COL + 1, min_row=DATA_START,
+                              max_row=trend_end)
+        line_cats = Reference(ws, min_col=TREND_COL, min_row=DATA_START + 1,
+                              max_row=trend_end)
+        line_chart.add_data(line_data, titles_from_data=True)
+        line_chart.set_categories(line_cats)
+        line_chart.legend = None
+        if line_chart.series:
+            line_chart.series[0].graphicalProperties.line.solidFill = ACCENT
+        ws.add_chart(line_chart, "A23")
+
+    # Column widths
+    for c in range(1, MAX_COL + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 12
+    ws.sheet_properties.tabColor = NAVY
+
 
 def _build_methodology(wb, df, total_spend, total_rows, vendor_col, generated):
     """Sheet 1: How This Was Built."""
@@ -405,18 +560,36 @@ def _build_bucket_hierarchy(wb, df, total_spend):
         row += 1
 
     _set_col_widths(ws, {1: 32, 2: 32, 3: 36, 4: 14, 5: 18, 6: 13, 7: 13})
+
+    # Data bars on Total Spend column (col 5) and color scale on % of Total (col 7)
+    if rows_data:
+        last_row = HEADER_ROW + len(rows_data)
+        ws.conditional_formatting.add(
+            f"E{HEADER_ROW + 1}:E{last_row}",
+            DataBarRule(start_type="min", end_type="max",
+                        color=ACCENT, showValue=True)
+        )
+        ws.conditional_formatting.add(
+            f"G{HEADER_ROW + 1}:G{last_row}",
+            ColorScaleRule(
+                start_type="min", start_color="FFFFFF",
+                mid_type="percentile", mid_value=50, mid_color="D6E4F0",
+                end_type="max", end_color="4472C4"
+            )
+        )
+
     _freeze_and_filter(ws, HEADER_ROW + 1, MAX_COL)
     ws.sheet_properties.tabColor = ACCENT
 
 
 def _build_top_vendors(wb, df, total_spend, vendor_col):
-    """Sheet 3: Top 30 Vendors per bucket."""
-    ws = wb.create_sheet("Top 30 Vendors")
+    """Sheet 3: Top 50 Vendors per bucket."""
+    ws = wb.create_sheet("Top 50 Vendors")
 
     headers = ["Master Bucket", "Rank", "Vendor", "Transactions",
                "Total Spend", "Avg Txn Size", "% of Bucket", "% of Total"]
     MAX_COL = len(headers)
-    _write_title_banner(ws, "Top 30 Vendors",
+    _write_title_banner(ws, "Top 50 Vendors",
                         "Largest vendors by spend within each category", MAX_COL)
 
     HEADER_ROW = 4
@@ -442,7 +615,7 @@ def _build_top_vendors(wb, df, total_spend, vendor_col):
             bdf.groupby(vendor_col)["_spend"]
             .agg(total="sum", count="size")
             .sort_values("total", ascending=False)
-            .head(30)
+            .head(50)
             .reset_index()
         )
 
@@ -683,6 +856,31 @@ def _build_spend_by_period(wb, df, total_spend):
     for i in range(PERIOD_START, MAX_COL + 1):
         ws.column_dimensions[get_column_letter(i)].width = 14
 
+    # Data bars on the Total Spend column (col 2)
+    last_data_row = HEADER_ROW + len(bucket_order)
+    if last_data_row > HEADER_ROW:
+        spend_range = f"B{HEADER_ROW + 1}:B{last_data_row}"
+        ws.conditional_formatting.add(
+            spend_range,
+            DataBarRule(start_type="min", end_type="max",
+                        color=ACCENT, showValue=True)
+        )
+
+        # Color scale on period cells (green → yellow → red by spend magnitude)
+        if periods:
+            period_start_letter = get_column_letter(PERIOD_START)
+            period_end_letter = get_column_letter(PERIOD_START + len(periods) - 1)
+            period_range = (f"{period_start_letter}{HEADER_ROW + 1}:"
+                            f"{period_end_letter}{last_data_row}")
+            ws.conditional_formatting.add(
+                period_range,
+                ColorScaleRule(
+                    start_type="min", start_color="FFFFFF",
+                    mid_type="percentile", mid_value=50, mid_color="D6E4F0",
+                    end_type="max", end_color="4472C4"
+                )
+            )
+
     _freeze_and_filter(ws, HEADER_ROW + 1, MAX_COL)
     ws.sheet_properties.tabColor = GREEN
 
@@ -804,14 +1002,18 @@ def main():
     # Remove default sheet
     wb.remove(wb.active)
 
+    print("  Building: Executive Dashboard")
+    _build_executive_dashboard(wb, df, total_spend, total_rows, vendor_col, generated)
+
     print("  Building: How This Was Built")
     _build_methodology(wb, df, total_spend, total_rows, vendor_col, generated)
 
     print("  Building: Bucket Hierarchy")
     _build_bucket_hierarchy(wb, df, total_spend)
 
-    print("  Building: Top 30 Vendors")
+    print("  Building: Top 50 Vendors")
     _build_top_vendors(wb, df, total_spend, vendor_col)
+
 
     print("  Building: Vendor Concentration")
     _build_vendor_concentration(wb, df, total_spend, vendor_col)
