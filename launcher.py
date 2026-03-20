@@ -56,34 +56,30 @@ def resolve_input_files(path):
 def read_file(filepath):
     """Read a CSV or Excel file into a DataFrame.
 
-    For CSVs, caps columns to the header count to prevent phantom columns
-    from unescaped commas/quotes in description fields.
+    For CSVs, drops phantom 'Unnamed:' columns created by unescaped
+    commas in description fields.
     """
     ext = os.path.splitext(filepath)[1].lower()
     if ext in (".xlsx", ".xls"):
         return pd.read_excel(filepath)
 
-    import csv as csv_mod
-    # Sniff the real header count
     for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
-            with open(filepath, encoding=enc, errors="replace", newline="") as fh:
-                header = next(csv_mod.reader(fh))
+            df = pd.read_csv(filepath, encoding=enc, low_memory=False,
+                             on_bad_lines="skip")
             break
-        except Exception:
-            continue
-
-    n = len(header)
-    for enc in ("utf-8-sig", "utf-8", "latin-1"):
-        try:
-            return pd.read_csv(filepath, encoding=enc, low_memory=False,
-                               usecols=range(n), names=header, header=0,
-                               on_bad_lines="skip")
         except UnicodeDecodeError:
             continue
-    return pd.read_csv(filepath, encoding="latin-1", low_memory=False,
-                       usecols=range(n), names=header, header=0,
-                       on_bad_lines="skip")
+    else:
+        df = pd.read_csv(filepath, encoding="latin-1", low_memory=False,
+                         on_bad_lines="skip")
+
+    # Drop phantom columns from misparse
+    phantom = [c for c in df.columns if str(c).startswith("Unnamed:")]
+    if phantom:
+        df = df.drop(columns=phantom)
+
+    return df
 
 
 def validate_categorized_output(filepath):

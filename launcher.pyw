@@ -19,37 +19,33 @@ sys.path.insert(0, script_dir)
 
 
 def _read_source_csv(path: str):
-    """Read a source CSV, capping columns to the header count.
+    """Read a source CSV, keeping only recognized columns.
 
-    PO data often has unescaped commas/quotes in description fields,
-    which makes pandas detect thousands of phantom columns.  We sniff
-    the true column count from the first line with Python's csv module
-    (which is more lenient) and force usecols so the C parser never
-    allocates memory for garbage columns.
+    PO data CSVs have unescaped commas in description fields, so pandas
+    detects thousands of phantom columns.  We read normally, then
+    immediately drop any column whose name starts with 'Unnamed:' (the
+    pandas default for headerless phantom columns) to reclaim memory
+    before concat.
     """
-    import csv as csv_mod
     import pandas as pd
 
-    # Sniff header — try utf-8-sig first (handles BOM), fall back
     for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
-            with open(path, encoding=enc, errors="replace", newline="") as fh:
-                header = next(csv_mod.reader(fh))
+            df = pd.read_csv(path, encoding=enc, low_memory=False,
+                             on_bad_lines="skip")
             break
-        except Exception:
-            continue
-
-    n = len(header)
-    for enc in ("utf-8-sig", "utf-8", "latin-1"):
-        try:
-            return pd.read_csv(path, encoding=enc, low_memory=False,
-                               usecols=range(n), names=header, header=0,
-                               on_bad_lines="skip")
         except UnicodeDecodeError:
             continue
-    return pd.read_csv(path, encoding="latin-1", low_memory=False,
-                       usecols=range(n), names=header, header=0,
-                       on_bad_lines="skip")
+    else:
+        df = pd.read_csv(path, encoding="latin-1", low_memory=False,
+                         on_bad_lines="skip")
+
+    # Drop phantom columns — they're named "Unnamed: 15", "Unnamed: 16", etc.
+    phantom = [c for c in df.columns if str(c).startswith("Unnamed:")]
+    if phantom:
+        df = df.drop(columns=phantom)
+
+    return df
 
 
 # ── Colour palette ────────────────────────────────────────────────────────────
