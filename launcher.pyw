@@ -7,6 +7,7 @@ then click Run to categorize and generate the Excel report.
 No extra dependencies beyond what run_categorization.py already needs.
 """
 
+import csv
 import os
 import sys
 import threading
@@ -297,7 +298,8 @@ class App(tk.Tk):
 
             # ── Write CSV ───────────────────────────────────────────────────
             csv_path = os.path.join(out_dir, "categorized_output.csv")
-            result.to_csv(csv_path, index=False, encoding="utf-8-sig")
+            result.to_csv(csv_path, index=False, encoding="utf-8-sig",
+                           quoting=csv.QUOTE_ALL)
             self._log(f"CSV saved: {csv_path}", "ok")
 
             # ── Write Excel ─────────────────────────────────────────────────

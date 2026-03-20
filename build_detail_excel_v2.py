@@ -108,13 +108,13 @@ def _read_csv_robust(path: str) -> pd.DataFrame:
     for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
             return pd.read_csv(path, encoding=enc,
-                               on_bad_lines="skip", engine="python")
+                               on_bad_lines="skip", low_memory=False)
         except UnicodeDecodeError:
             continue
         except Exception:
             break
     return pd.read_csv(path, encoding="latin-1",
-                       on_bad_lines="skip", engine="python")
+                       on_bad_lines="skip", low_memory=False)
 
 
 def _coerce_date(df: pd.DataFrame) -> pd.Series:

@@ -11,6 +11,7 @@ Works two ways:
 """
 
 import argparse
+import csv
 import os
 import sys
 import glob
@@ -137,7 +138,8 @@ def run_pipeline(input_path, output_dir, use_categorized_output=None, skip_aggre
             print(f"  Combined: {len(combined):,} total rows")
 
             results = categorize_dataframe(combined)
-            results.to_csv(categorized_file, index=False, encoding="utf-8-sig")
+            results.to_csv(categorized_file, index=False, encoding="utf-8-sig",
+                           quoting=csv.QUOTE_ALL)
             print(f"  Saved categorized output to: {categorized_file}")
 
             # Print summary

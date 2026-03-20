@@ -8,7 +8,7 @@ Three ways to use:
      (The GUI uses option 2/3 — passing the file you browsed to)
 """
 
-import sys, os, glob
+import sys, os, glob, csv
 import pandas as pd
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -87,7 +87,7 @@ out_dir = os.path.dirname(output_file)
 if out_dir:
     os.makedirs(out_dir, exist_ok=True)
 
-out.to_csv(output_file, index=False, encoding="utf-8-sig")
+out.to_csv(output_file, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_ALL)
 print(f"Written to: {output_file}")
 
 # ── Bucket summary ─────────────────────────────────────────────────────────────
