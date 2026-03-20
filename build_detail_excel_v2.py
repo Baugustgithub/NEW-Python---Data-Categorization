@@ -106,25 +106,46 @@ def _safe_num(s: pd.Series) -> pd.Series:
 
 def _read_csv_robust(path: str) -> pd.DataFrame:
     # Prefer pickle sidecar — avoids all CSV quoting/parsing issues
-    pkl_path = path.replace(".csv", ".pkl")
-    if os.path.exists(pkl_path):
+    pkl_path = path.replace(".csv", ".pkl") if path.endswith(".csv") else None
+
+    # Also accept .pkl path directly
+    if path.endswith(".pkl"):
+        pkl_path = path
+
+    if pkl_path and os.path.exists(pkl_path):
         try:
             df = pd.read_pickle(pkl_path)
-            print(f"  (loaded from pickle: {os.path.basename(pkl_path)})")
+            print(f"  (loaded from pickle: {os.path.basename(pkl_path)}, "
+                  f"{len(df):,} rows x {len(df.columns)} cols)")
             return df
-        except Exception:
-            pass  # fall through to CSV
+        except Exception as e:
+            print(f"  WARNING: pickle load failed ({e}), falling back to CSV")
+
+    # CSV fallback — sniff the real header to cap column count
+    csv_path = path if path.endswith(".csv") else path.replace(".pkl", ".csv")
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"Neither pickle nor CSV found for: {path}")
+
+    # Read just the header line to determine expected column count
+    import csv as csv_mod
+    with open(csv_path, encoding="utf-8-sig", errors="replace") as f:
+        reader = csv_mod.reader(f)
+        header = next(reader)
+    n_cols = len(header)
+    print(f"  CSV header has {n_cols} columns, reading with names forced…")
 
     for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
-            return pd.read_csv(path, encoding=enc,
-                               on_bad_lines="skip", low_memory=False)
+            return pd.read_csv(csv_path, encoding=enc, names=header,
+                               header=0, on_bad_lines="skip",
+                               low_memory=False, usecols=range(n_cols))
         except UnicodeDecodeError:
             continue
         except Exception:
             break
-    return pd.read_csv(path, encoding="latin-1",
-                       on_bad_lines="skip", low_memory=False)
+    return pd.read_csv(csv_path, encoding="latin-1", names=header,
+                       header=0, on_bad_lines="skip",
+                       low_memory=False, usecols=range(n_cols))
 
 
 def _coerce_date(df: pd.DataFrame) -> pd.Series:
@@ -981,7 +1002,13 @@ def _build_single_txn_vendors(wb, df, total_spend, vendor_col):
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    inp = sys.argv[1] if len(sys.argv) > 1 else os.path.join(script_dir, "categorized_output.csv")
+    # Accept .pkl or .csv path; default to pkl if available
+    if len(sys.argv) > 1:
+        inp = sys.argv[1]
+    else:
+        pkl_default = os.path.join(script_dir, "categorized_output.pkl")
+        csv_default = os.path.join(script_dir, "categorized_output.csv")
+        inp = pkl_default if os.path.exists(pkl_default) else csv_default
     outp = sys.argv[2] if len(sys.argv) > 2 else os.path.join(script_dir, "Procurement_Detail_Breakdown.xlsx")
 
     print(f"Reading: {inp}")

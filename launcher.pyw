@@ -304,7 +304,12 @@ class App(tk.Tk):
 
             # Write pickle for reliable Excel builder hand-off (no CSV parsing issues)
             pkl_path = csv_path.replace(".csv", ".pkl")
-            result.to_pickle(pkl_path)
+            try:
+                result.to_pickle(pkl_path)
+                self._log(f"Pickle saved: {pkl_path}", "ok")
+            except Exception as e:
+                self._log(f"Pickle write failed ({e}), Excel will use CSV", "warn")
+                pkl_path = csv_path  # fall back to CSV path
 
             # ── Write Excel ─────────────────────────────────────────────────
             xlsx_path = os.path.join(out_dir, "Procurement_Detail_Breakdown.xlsx")
@@ -315,7 +320,7 @@ class App(tk.Tk):
             python_exe = sys.executable.replace("pythonw.exe", "python.exe")
             excel_result = subprocess.run(
                 [python_exe, os.path.join(script_dir, "build_detail_excel_v2.py"),
-                 csv_path, xlsx_path],
+                 pkl_path, xlsx_path],
                 capture_output=True, text=True
             )
             if excel_result.stdout:
