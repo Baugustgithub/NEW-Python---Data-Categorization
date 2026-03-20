@@ -607,23 +607,26 @@ CATEGORY_L1_MAP = {
 # ══════════════════════════════════════════════════════════════
 KEYWORD_PATTERNS = [
     ("IT","IT Hardware & Peripherals","Computers",
-     r"\b(laptop|notebook|desktop|workstation|monitor|docking|keyboard|mouse|tablet|ipad|iphone|chromebook|server|storage|nas|san|switch|router|firewall|access.?point|wifi|cisco|meraki|juniper|aruba|ups|uninterruptible|scanner)\b",
+     r"\b(laptop|notebook|desktop|workstation|(?:computer\s+)?monitor|docking\s+station|keyboard|mouse|tablet|ipad|iphone|chromebook|server|(?:data|network|cloud)\s+storage|nas\b|san\b|network\s+switch|router|firewall|access.?point|wifi|cisco|meraki|juniper|aruba|ups|uninterruptible|barcode\s+scanner|document\s+scanner|toner|cartridge|ink.?jet|laser.?jet)\b",
      "kw:it_hardware"),
     ("IT","IT Software / SaaS","Software",
-     r"\b(licen[cs]e|subscription|saas|software|renewal|maintenance.?agree|cloud.?hosting|vmware|office.?365|azure|aws|oracle|salesforce|zoom|slack|servicenow|jira|atlassian|matlab|stata|spss|endnote|adobe)\b",
+     r"\b((?:software|site)\s+licen[cs]e|subscription|saas|software|(?:licen[cs]e|maintenance)\s+renewal|maintenance.?agree|cloud.?hosting|vmware|office.?365|azure|aws|oracle|salesforce|zoom|slack|servicenow|jira|atlassian|matlab|stata|spss|endnote|adobe|sharepoint|power\s*bi|tableau|workday|banner|peoplesoft|blackboard|canvas\s+lms|antivirus|endpoint\s+protect)\b",
      "kw:it_software"),
     ("Research & Laboratory","Lab Consumables","Lab Supplies",
      r"\b(reagent|assay|antibody|enzyme|buffer|pcr|qpcr|elisa|hplc|gcms|nmr|centrifuge|incubator|cryogenic|liquid nitrogen|cell culture|dmem|fbs|serum|pipett|microplate|vial|flask|beaker|glassware|eppendorf|cuvette)\b",
      "kw:lab_consumables"),
     ("Research & Laboratory","Lab Equipment & Instruments","Instruments",
-     r"\b(mass spec|flow cyt|sequenc|imaging system|analyzer|electrophoresis|western blot|thermocycler|autoclave|biosafety cabinet|fume hood|lyophiliz|freeze.?dry|spectrophotom|microscop)\b",
+     r"\b(mass spec|flow cyt|sequenc|imaging system|analyzer|electrophoresis|western blot|thermocycler|autoclave|biosafety cabinet|fume hood|lyophiliz|freeze.?dry|spectrophotom|microscop|chromatograph|spectrometer|bioanalyzer|plate reader|homogenizer|sonicator|rotary evaporator)\b",
      "kw:lab_equipment"),
+    ("Research & Laboratory","Lab Animals & Vivarium","Animal Research",
+     r"\b(vivarium|animal care|animal facility|mouse|mice|rat\b|rodent|cage|bedding|chow|animal feed|iacuc|veterinar)\b",
+     "kw:lab_animals"),
     ("Clinical / Healthcare","Patient/Participant Payments","Stipends",
      r"\b(stipend|participant payment|patient stipend|honorarium|honoraria|subject payment)\b",
      "kw:stipend"),
     # ── Capital Projects & Construction ───────────────────────────────────────
     ("Capital Projects & Construction","General Contractor / CM","Construction",
-     r"\b(general contractor|\bGC\b|construction manager|\bCM\b|construction contract|renovation contract|new construction|building construction|sitework|earthwork|demolition|abatement|grading|foundation|concrete work|masonry|roofing contract|waterproof(ing)?|commissioning service|construction service|build-out|fit.?out|tenant improvement|\bTI\b\s+work|capital improvement|capital project|capital renewal|infrastructure project|deferred maintenance project)\b",
+     r"\b(general contractor|\bGC\b|construction manager|\bCM\b|construction contract|renovation contract|new construction|building construction|sitework|earthwork|demolition|abatement|grading|foundation|concrete work|masonry|roofing contract|waterproof(ing)?|commissioning service|construction service|build-out|fit.?out|tenant improvement|TI\s+work|capital improvement|capital project|capital renewal|infrastructure project|deferred maintenance project)\b",
      "kw:construction"),
     ("Capital Projects & Construction","Architecture & Engineering","A&E Services",
      r"\b(architectural service|architecture service|engineering service|design service|design.?build|structural engineer|civil engineer|mep engineer|schematic design|design development|construction document|bid document|specification writing|commissioning engineer|owner.?s rep|\bCxA\b|project architect)\b",
@@ -635,10 +638,13 @@ KEYWORD_PATTERNS = [
      r"\b(hvac|plumb(ing)?|electrical contractor|conduit|breaker|panel|service call|boiler|chiller|duct|compressor|generator|cooling tower)\b",
      "kw:trades"),
     ("Facilities / MRO","Janitorial","Cleaning",
-     r"\b(janitorial|custodial|clean(ing|er)|mop|disinfect|sanitiz|floor wax|restroom supply)\b",
+     r"\b(janitorial|custodial|(?<!clean)clean(?:ing|er)(?!room)|mop|disinfect|sanitiz|floor wax|restroom supply|trash bag|waste liner|paper towel|hand soap)\b",
      "kw:janitorial"),
+    ("Facilities / MRO","Safety & PPE","Safety",
+     r"\b(ppe\b|personal protective|safety glass(?:es)?|safety goggle[s]?|hard hat|helmet|ear plug|ear muff|respirator|n95|face shield|safety vest|hi.?vis|first aid kit|fire extinguisher|aed\b|safety sign|caution tape|safety shoe|steel toe)\b",
+     "kw:safety_ppe"),
     ("Facilities / MRO","MRO Supplies","General MRO",
-     r"\b(fastener|bolt|nut|screw|hinge|paint|caulk|seal|gasket|bearing|belt|pump|valve|fitting|coupling|bracket|mounting hardware)\b",
+     r"\b(fastener|bolt|nut|screw|hinge|paint|caulk|seal|gasket|bearing|belt|pump|valve|fitting|coupling|bracket|mounting hardware|adhesive|lubricant|wire|cable tie|zip tie)\b",
      "kw:mro"),
     ("Travel, Events & Hospitality","Lodging","Hotel",
      r"\b(lodging|hotel|inn|suites|accommodation|airbnb)\b",
@@ -647,7 +653,7 @@ KEYWORD_PATTERNS = [
      r"\b(airfare|flight|airline|delta|united|american airlines|southwest|amtrak|uber|lyft|per diem|mileage|car rental|rental car)\b",
      "kw:transportation"),
     ("Travel, Events & Hospitality","Event / Venue","Events",
-     r"\b(conference|registration fee|venue|event space|banquet|gala|reception|award ceremony|sponsorship)\b",
+     r"\b(conference(?!\s+call|bridge|line)|registration fee|venue|event space|banquet|gala|reception|award ceremony|sponsorship|seminar|symposium|workshop\s+event|exhibit|tradeshow|trade\s+show)\b",
      "kw:events"),
     # ── Services L2 taxonomy — keyword precedence order ─────────────────────
     # Rule: more-specific patterns fire first; generic fallback at end.
@@ -705,10 +711,13 @@ KEYWORD_PATTERNS = [
      r"\b(consult(ing|ant)|advisory service|management consult|strategy consult|assessment service|evaluation service|technical assistance|professional service|contract service|program management service|project management service)\b",
      "kw:svc_consulting"),
     ("Printing, Marketing & Communications","Printing","Print",
-     r"\b(print(ing)?|typeset|binding|poster|banner|brochure|flyer|letterhead)\b",
+     r"\b((?<!3d\s)(?<!3d)print(ing)?(?!\s+press)|typeset|binding|poster|banner|brochure|flyer|letterhead|business card|envelop|signage)\b",
      "kw:printing"),
+    ("Admin & Office","Office Supplies","Office",
+     r"\b(office supply|office supplies|staple[rs]?|paper clip|binder|folder|notebook|post.?it|dry.?erase|whiteboard|marker|pen[cs]il|copy paper|printer paper|desk|filing cabinet|shredder|laminator)\b",
+     "kw:office_supplies"),
     ("Food & Catering","Food & Beverage","Catering",
-     r"\b(cater(ing)?|food service|lunch|dinner|breakfast|refreshment|beverage|coffee service)\b",
+     r"\b(cater(ing)?|food service|lunch(eon)?|dinner|breakfast|refreshment|beverage(?!\s+cart)|coffee service|meal|snack)\b",
      "kw:catering"),
     ("Utilities & Occupancy","Electric / Gas","Utilities",
      r"\b(electric(ity)?|utility bill|power bill|gas bill|water bill|kilowatt|kwh)\b",
@@ -768,7 +777,7 @@ def categorize_row(row: dict) -> dict:
     cat1      = str(row.get("Category Level 1","")).strip().lower()
     desc      = str(row.get("Product Description","")).strip().lower()
     mfr       = str(row.get("Manufacturer","")).strip().lower()
-    scan_text = f"{desc} {mfr} {cat1}"
+    scan_text = f"{vendor} {desc} {mfr} {cat1}"
 
     # Pass 0: vendor hard overrides (beats commodity code)
     for kw, (m, l2, l3, hit) in VENDOR_OVERRIDES.items():
