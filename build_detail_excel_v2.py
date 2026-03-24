@@ -997,6 +997,67 @@ def _build_single_txn_vendors(wb, df, total_spend, vendor_col):
     ws.sheet_properties.tabColor = AMBER
 
 
+def build_excel_from_df(df: pd.DataFrame, outp: str, log=print):
+    """Build the Excel report directly from an in-memory DataFrame.
+
+    This avoids the CSV round-trip entirely — no disk I/O, no re-parsing.
+    Called by launcher.pyw and launcher.py when the DataFrame is already
+    in memory after categorization.
+    """
+    # Drop any phantom columns that slipped through
+    phantom = [c for c in df.columns if str(c).startswith("Unnamed:")]
+    if phantom:
+        df = df.drop(columns=phantom)
+
+    if "Extended Price" not in df.columns:
+        raise ValueError("Expected 'Extended Price' column in categorized file.")
+    if "master_bucket" not in df.columns:
+        raise ValueError("Expected 'master_bucket' in categorized file. Re-run categorization first.")
+
+    df["_spend"] = _safe_num(df["Extended Price"])
+    dates = _coerce_date(df)
+    df["_month"], df["_fy"] = (
+        dates.dt.to_period("M").astype(str),
+        dates.dt.year.where(dates.dt.month < 7, dates.dt.year + 1),
+    )
+
+    vendor_col = _find_vendor_col(df)
+    total_spend = float(df["_spend"].sum())
+    total_rows = len(df)
+    generated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    log(f"Rows: {total_rows:,}  |  Spend: {_fmt_currency(total_spend)}  |  Vendors: {df[vendor_col].nunique() if vendor_col else 'N/A'}")
+
+    from openpyxl import Workbook
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    log("  Building: Executive Dashboard")
+    _build_executive_dashboard(wb, df, total_spend, total_rows, vendor_col, generated)
+
+    log("  Building: How This Was Built")
+    _build_methodology(wb, df, total_spend, total_rows, vendor_col, generated)
+
+    log("  Building: Bucket Hierarchy")
+    _build_bucket_hierarchy(wb, df, total_spend)
+
+    log("  Building: Top 50 Vendors")
+    _build_top_vendors(wb, df, total_spend, vendor_col)
+
+    log("  Building: Vendor Concentration")
+    _build_vendor_concentration(wb, df, total_spend, vendor_col)
+
+    log("  Building: Spend by Period")
+    _build_spend_by_period(wb, df, total_spend)
+
+    log("  Building: Single-Txn Vendors")
+    _build_single_txn_vendors(wb, df, total_spend, vendor_col)
+
+    log(f"Saving: {outp}")
+    wb.save(outp)
+    log(f"Written: {outp}")
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():

@@ -7,7 +7,6 @@ then click Run to categorize and generate the Excel report.
 No extra dependencies beyond what run_categorization.py already needs.
 """
 
-import csv
 import os
 import sys
 import threading
@@ -316,45 +315,18 @@ class App(tk.Tk):
             avg_conf = result["confidence_score"].mean()
             self._log(f"  Avg confidence: {avg_conf:.0%}", "ok")
 
-            # ── Write CSV ───────────────────────────────────────────────────
+            # ── Write CSV (only real columns, not phantom ones) ──────────
             csv_path = os.path.join(out_dir, "categorized_output.csv")
-            result.to_csv(csv_path, index=False, encoding="utf-8-sig",
-                           quoting=csv.QUOTE_ALL)
+            result.to_csv(csv_path, index=False, encoding="utf-8-sig")
             self._log(f"CSV saved: {csv_path}", "ok")
 
-            # Write pickle for reliable Excel builder hand-off (no CSV parsing issues)
-            pkl_path = csv_path.replace(".csv", ".pkl")
-            try:
-                result.to_pickle(pkl_path)
-                self._log(f"Pickle saved: {pkl_path}", "ok")
-            except Exception as e:
-                self._log(f"Pickle write failed ({e}), Excel will use CSV", "warn")
-                pkl_path = csv_path  # fall back to CSV path
-
-            # ── Write Excel ─────────────────────────────────────────────────
+            # ── Build Excel directly from in-memory DataFrame ──────────
             xlsx_path = os.path.join(out_dir, "Procurement_Detail_Breakdown.xlsx")
             self._log("Building Excel report…")
-            import subprocess
-            # Use python.exe (not pythonw.exe) so the subprocess can write to
-            # stdout/stderr normally.  sys.executable inside a .pyw is pythonw.
-            python_exe = sys.executable.replace("pythonw.exe", "python.exe")
-            excel_result = subprocess.run(
-                [python_exe, os.path.join(script_dir, "build_detail_excel_v2.py"),
-                 pkl_path, xlsx_path],
-                capture_output=True, text=True
-            )
-            if excel_result.stdout:
-                self._log(excel_result.stdout.strip())
-            if excel_result.returncode != 0:
-                if excel_result.stderr:
-                    for line in excel_result.stderr.strip().splitlines():
-                        self._log(line, "err")
-                else:
-                    self._log(f"Excel generation failed with exit code {excel_result.returncode}", "err")
-                self._log("Categorization complete. CSV saved but Excel report failed.", "warn")
-            else:
-                self._log(f"Excel saved: {xlsx_path}", "ok")
-                self._log("Done! Open Procurement_Detail_Breakdown.xlsx to view results.", "ok")
+            from build_detail_excel_v2 import build_excel_from_df
+            build_excel_from_df(result, xlsx_path, log=self._log)
+            self._log(f"Excel saved: {xlsx_path}", "ok")
+            self._log("Done! Open Procurement_Detail_Breakdown.xlsx to view results.", "ok")
             self._log("─" * 60, "hdr")
 
         except Exception as e:
@@ -388,27 +360,17 @@ class App(tk.Tk):
 
     def _excel_worker(self, csv_path):
         try:
-            import subprocess
+            import pandas as pd
+            from build_detail_excel_v2 import build_excel_from_df, _read_csv_robust
+
             out_dir = self.out_var.get() or script_dir
             xlsx_path = os.path.join(out_dir, "Procurement_Detail_Breakdown.xlsx")
 
-            python_exe = sys.executable.replace("pythonw.exe", "python.exe")
-            result = subprocess.run(
-                [python_exe, os.path.join(script_dir, "build_detail_excel_v2.py"),
-                 csv_path, xlsx_path],
-                capture_output=True, text=True
-            )
-            if result.stdout:
-                self._log(result.stdout.strip())
-            if result.returncode != 0:
-                if result.stderr:
-                    for line in result.stderr.strip().splitlines():
-                        self._log(line, "err")
-                else:
-                    self._log(f"Excel generation failed with exit code {result.returncode}", "err")
-            else:
-                self._log(f"Excel saved: {xlsx_path}", "ok")
-                self._log("Done! Open Procurement_Detail_Breakdown.xlsx to view results.", "ok")
+            self._log("Reading categorized data…")
+            df = _read_csv_robust(csv_path)
+            build_excel_from_df(df, xlsx_path, log=self._log)
+            self._log(f"Excel saved: {xlsx_path}", "ok")
+            self._log("Done! Open Procurement_Detail_Breakdown.xlsx to view results.", "ok")
             self._log("─" * 60, "hdr")
         except Exception as e:
             import traceback

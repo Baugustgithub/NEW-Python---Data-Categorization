@@ -11,7 +11,6 @@ Works two ways:
 """
 
 import argparse
-import csv
 import os
 import sys
 import glob
@@ -148,10 +147,7 @@ def run_pipeline(input_path, output_dir, use_categorized_output=None, skip_aggre
             print(f"  Combined: {len(combined):,} total rows")
 
             results = categorize_dataframe(combined)
-            results.to_csv(categorized_file, index=False, encoding="utf-8-sig",
-                           quoting=csv.QUOTE_ALL)
-            # Write pickle for reliable Excel builder hand-off (no CSV parsing issues)
-            results.to_pickle(categorized_file.replace(".csv", ".pkl"))
+            results.to_csv(categorized_file, index=False, encoding="utf-8-sig")
             print(f"  Saved categorized output to: {categorized_file}")
 
             # Print summary
@@ -188,15 +184,10 @@ def run_pipeline(input_path, output_dir, use_categorized_output=None, skip_aggre
         print("Running Excel generation step...")
         try:
             excel_output = os.path.join(output_dir, "Procurement_Detail_Breakdown.xlsx")
-            result = subprocess.run(
-                [sys.executable, os.path.join(script_dir, "build_detail_excel_v2.py"), categorized_file, excel_output],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            print(result.stdout)
-        except subprocess.CalledProcessError as e:
-            return False, f"Excel generation failed: {e.stderr}"
+            from build_detail_excel_v2 import build_excel_from_df
+            build_excel_from_df(results, excel_output)
+        except Exception as e:
+            return False, f"Excel generation failed: {e}"
 
     return True, "Pipeline completed successfully!"
 
