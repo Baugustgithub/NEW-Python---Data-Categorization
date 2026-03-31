@@ -19,30 +19,7 @@ import os
 import sys
 from datetime import datetime
 import pandas as pd
-
-
-def _safe_num_series(s: pd.Series) -> pd.Series:
-    return (
-        s.astype(str)
-        .str.replace("$", "", regex=False)
-        .str.replace(",", "", regex=False)
-        .str.strip()
-        .pipe(pd.to_numeric, errors="coerce")
-        .fillna(0.0)
-    )
-
-
-def _read_csv_robust(path: str) -> pd.DataFrame:
-    for enc in ("utf-8-sig", "utf-8", "latin-1"):
-        try:
-            return pd.read_csv(path, low_memory=False, encoding=enc,
-                               on_bad_lines="skip", engine="python")
-        except UnicodeDecodeError:
-            continue
-        except Exception:
-            break
-    return pd.read_csv(path, low_memory=False, encoding="latin-1",
-                       on_bad_lines="skip", engine="python")
+from utils import safe_num_series as _safe_num_series, read_csv_robust as _read_csv_robust
 
 
 def _coerce_date(df: pd.DataFrame) -> pd.Series:
@@ -66,12 +43,14 @@ def _infer_on_contract(df: pd.DataFrame) -> pd.Series:
 
     contract_cols = [c for c in ["Contract No", "Contract Number", "Contract #", "Contract"] if c in df.columns]
     if contract_cols:
-        has_contract_num = df[contract_cols].astype(str).apply(
-            lambda r: any(x.strip() and x.strip().lower() not in {"nan", "none"} for x in r),
-            axis=1
-        )
+        # Vectorized: check if any contract column has a real value (not blank/nan/none)
+        _invalid = {"", "nan", "none"}
+        has_contract_num = pd.Series(False, index=df.index)
+        for col in contract_cols:
+            normed = df[col].astype(str).str.strip().str.lower()
+            has_contract_num = has_contract_num | ~normed.isin(_invalid)
     else:
-        has_contract_num = pd.Series([False] * len(df))
+        has_contract_num = pd.Series(False, index=df.index)
 
     method_col = None
     for c in ["Procurement Method", "Method", "Payment Method", "PO Type", "Order Type",
@@ -84,7 +63,7 @@ def _infer_on_contract(df: pd.DataFrame) -> pd.Series:
         method_norm = df[method_col].astype(str).str.strip().str.lower()
         on_method = method_norm.isin(ON_CONTRACT_METHODS)
     else:
-        on_method = pd.Series([False] * len(df))
+        on_method = pd.Series(False, index=df.index)
 
     return has_contract_num | on_method
 

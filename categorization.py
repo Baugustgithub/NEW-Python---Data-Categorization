@@ -559,15 +559,12 @@ VENDOR_MAP = {
     "davis and green":               ("Facilities / MRO","Trades Services","General Contractor","vendor:davis_green"),
     "trc engineers":                 ("Capital Projects & Construction","Architecture & Engineering","Engineering","vendor:trc_engineers"),
     # Specific vendor overrides (commodity code gives wrong bucket)
-    "aramark":                       ("Food & Catering","Food & Beverage","Dining Services","vendor:aramark"),
-    "barnes & noble":                ("Admin & Office","Published / Books","Textbooks & Course Materials","vendor:barnes_noble"),
-    "exela enterprise":              ("Admin & Office","Office Supplies","Postage & Mail Services","vendor:exela"),
+    # NOTE: aramark, barnes & noble, exela enterprise, dbhds already in VENDOR_OVERRIDES (Pass 0)
     "trane":                         ("Facilities / MRO","Trades Services","HVAC & Mechanical","vendor:trane"),
     "pmc commercial interiors":      ("Admin & Office","Furniture & Fixtures","Office Furniture","vendor:pmc_interiors"),
     "sycom technologies":            ("IT","Network / Telecom","Network Infrastructure","vendor:sycom"),
     "epitome networks":              ("IT","IT Hardware & Peripherals","AV & Network Equipment","vendor:epitome"),
     "rtw media":                     ("IT","IT Services","AV & Media Services","vendor:rtw_media"),
-    "dbhds":                         ("Inter-Entity / Transfers","City/State/Federal","State Behavioral Health","vendor:dbhds"),
     # Inter-Entity
     "candex":                        ("Inter-Entity / Transfers","Candex / Pass-through","Payment Rail","vendor:candex"),
     "vcu health system":             ("Inter-Entity / Transfers","Internal Health System","VCU Health","vendor:vcuhs"),
@@ -835,16 +832,45 @@ def rule_pass_label(n):
             3:"Category Metadata", 4:"Keyword / Regex", 5:"Account-Family Fallback"}.get(n, "Unknown")
 
 def categorize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    # Run rule engine — one dict per row
-    results = df.apply(lambda r: categorize_row(r.to_dict()), axis=1, result_type="expand")
+    # Pre-extract columns as lists for fast iteration (avoids per-row Series/dict overhead)
+    _get = lambda col: df[col].astype(str).tolist() if col in df.columns else [""] * len(df)
+    vendors    = _get("Vendor Name")
+    commodities = _get("Commodity Code")
+    accounts   = _get("Account")
+    cat1s      = _get("Category Level 1")
+    descs      = _get("Product Description")
+    mfrs       = _get("Manufacturer")
 
-    # Build all derived columns in one shot — avoids PerformanceWarning from incremental inserts
-    extra = pd.DataFrame({
-        "confidence_label":     results["confidence_score"].apply(confidence_label),
-        "rule_pass_label":      results["rule_pass"].apply(rule_pass_label),
-        "services_review_flag": results.apply(_needs_services_review, axis=1),
-    }, index=results.index)
+    rows_out = []
+    for i in range(len(df)):
+        row = {
+            "Vendor Name": vendors[i],
+            "Commodity Code": commodities[i],
+            "Account": accounts[i],
+            "Category Level 1": cat1s[i],
+            "Product Description": descs[i],
+            "Manufacturer": mfrs[i],
+        }
+        rows_out.append(categorize_row(row))
+
+    results = pd.DataFrame(rows_out)
+
+    # Vectorized label lookups
+    _cl = {0.95: "Very High", 0.9: "Very High", 0.7: "High", 0.5: "Medium", 0.2: "Low", 0.1: "Low"}
+    _rpl = {0: "Vendor Hard Override", 1: "Commodity Code Crosswalk", 2: "Vendor Always-List",
+            3: "Category Metadata", 4: "Keyword / Regex", 5: "Account-Family Fallback"}
+
+    results["confidence_label"] = results["confidence_score"].map(_cl).fillna(
+        results["confidence_score"].apply(confidence_label))
+    results["rule_pass_label"] = results["rule_pass"].map(_rpl).fillna("Unknown")
+    results["services_review_flag"] = (
+        (results["master_bucket"] == "Services")
+        & (
+            (results["rule_pass"] >= 5)
+            | results["rule_hit"].isin(_SERVICES_REVIEW_HITS)
+            | results["rule_hit"].str.startswith("acct:")
+        )
+    )
 
     return pd.concat([df.reset_index(drop=True),
-                      results.reset_index(drop=True),
-                      extra.reset_index(drop=True)], axis=1)
+                      results.reset_index(drop=True)], axis=1)
