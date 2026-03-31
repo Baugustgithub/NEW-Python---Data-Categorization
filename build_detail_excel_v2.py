@@ -167,8 +167,8 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         print(f"\nERROR: {e}")
-        if sys.stdin.isatty():
+        if sys.stdin is not None and sys.stdin.isatty():
             input("\nPress Enter to exit...")
         sys.exit(1)
-    if sys.stdin.isatty():
+    if sys.stdin is not None and sys.stdin.isatty():
         input("\nPress Enter to exit...")
