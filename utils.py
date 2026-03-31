@@ -18,11 +18,10 @@ def read_csv_robust(path: str) -> pd.DataFrame:
     """Read a CSV trying multiple encodings, skipping bad lines."""
     for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
-            return pd.read_csv(path, low_memory=False, encoding=enc,
-                               on_bad_lines="skip", engine="python")
+            return pd.read_csv(path, low_memory=False, encoding=enc)
         except UnicodeDecodeError:
             continue
         except Exception:
             break
-    return pd.read_csv(path, low_memory=False, encoding="latin-1",
+    return pd.read_csv(path, encoding="latin-1",
                        on_bad_lines="skip", engine="python")

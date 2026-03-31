@@ -68,12 +68,21 @@ def _infer_on_contract(df: pd.DataFrame) -> pd.Series:
     return has_contract_num | on_method
 
 
+def build_report(df, outp):
+    """Build Excel report from an already-loaded DataFrame."""
+    _build_report_impl(df, outp)
+
+
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     inp = sys.argv[1] if len(sys.argv) > 1 else os.path.join(script_dir, "categorized_output.csv")
     outp = sys.argv[2] if len(sys.argv) > 2 else os.path.join(script_dir, "Procurement_Detail_Breakdown.xlsx")
 
     df = _read_csv_robust(inp)
+    _build_report_impl(df, outp)
+
+
+def _build_report_impl(df, outp):
 
     if "Extended Price" not in df.columns:
         raise ValueError("Expected 'Extended Price' column in categorized file.")

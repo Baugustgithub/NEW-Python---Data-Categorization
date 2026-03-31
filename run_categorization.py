@@ -32,22 +32,9 @@ def _read_file_robust(path):
 
 
 def build_excel_report(df, output_path):
-    """Build the Excel report from an already-categorized DataFrame.
-    Delegates to build_detail_excel_v2 but accepts a DataFrame directly."""
-    from build_detail_excel_v2 import main as _excel_main
-    # build_detail_excel_v2.main() reads from CSV, so write a temp CSV and call it
-    import tempfile
-    with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w",
-                                     encoding="utf-8-sig", newline="") as tmp:
-        df.to_csv(tmp, index=False)
-        tmp_path = tmp.name
-    try:
-        _orig_argv = sys.argv
-        sys.argv = ["build_detail_excel_v2.py", tmp_path, output_path]
-        _excel_main()
-        sys.argv = _orig_argv
-    finally:
-        os.unlink(tmp_path)
+    """Build the Excel report from an already-categorized DataFrame."""
+    from build_detail_excel_v2 import build_report
+    build_report(df, output_path)
 
 
 def main():
