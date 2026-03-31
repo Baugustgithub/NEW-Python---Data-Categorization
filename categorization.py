@@ -576,6 +576,18 @@ VENDOR_MAP = {
     "us dhhs":                       ("Inter-Entity / Transfers","City/State/Federal","Federal Agency","vendor:dhhs"),
     "treasurer of virginia":         ("Inter-Entity / Transfers","City/State/Federal","State","vendor:va_treasurer"),
     "commonwealth of virginia":      ("Inter-Entity / Transfers","City/State/Federal","State","vendor:va_state"),
+    # ── Common vendors missing from original list ────────────────────────
+    "mcmaster":                      ("Facilities / MRO","MRO Supplies","General MRO","vendor:mcmaster"),
+    "uline":                         ("Facilities / MRO","MRO Supplies","General MRO","vendor:uline"),
+    "staples":                       ("Admin & Office","Office Supplies","Office Supplies","vendor:staples"),
+    "office depot":                  ("Admin & Office","Office Supplies","Office Supplies","vendor:office_depot"),
+    "wb mason":                      ("Admin & Office","Office Supplies","Office Supplies","vendor:wb_mason"),
+    "global industrial":             ("Facilities / MRO","MRO Supplies","General MRO","vendor:global_industrial"),
+    "bh photo":                      ("IT","IT Hardware & Peripherals","IT Equipment","vendor:bh_photo"),
+    "b&h photo":                     ("IT","IT Hardware & Peripherals","IT Equipment","vendor:bh_photo"),
+    "amazon":                        ("Admin & Office","General Admin","Marketplace","vendor:amazon"),
+    "patterson dental":              ("Clinical / Healthcare","Medical Supplies","Dental Supplies","vendor:patterson_dental"),
+    "benco dental":                  ("Clinical / Healthcare","Medical Supplies","Dental Supplies","vendor:benco_dental"),
 }
 
 # ══════════════════════════════════════════════════════════════
@@ -605,7 +617,8 @@ CATEGORY_L1_MAP = {
 KEYWORD_PATTERNS = [
     ("IT","IT Hardware & Peripherals","Computers",
      r"\b(laptop|notebook|desktop|workstation|monitor|docking|keyboard|mouse|tablet|ipad|iphone|chromebook|server|storage|nas|san|switch|router|firewall|access.?point|wifi|cisco|meraki|juniper|aruba|ups|uninterruptible|scanner)\b",
-     "kw:it_hardware"),
+     "kw:it_hardware",
+     r"\b(software|license|subscription|saas|renewal)\b"),
     ("IT","IT Software / SaaS","Software",
      r"\b(licen[cs]e|subscription|saas|software|renewal|maintenance.?agree|cloud.?hosting|vmware|office.?365|azure|aws|oracle|salesforce|zoom|slack|servicenow|jira|atlassian|matlab|stata|spss|endnote|adobe)\b",
      "kw:it_software"),
@@ -630,7 +643,8 @@ KEYWORD_PATTERNS = [
      "kw:cap_equip_install"),
     ("Facilities / MRO","Trades Services","HVAC",
      r"\b(hvac|plumb(ing)?|electrical contractor|conduit|breaker|panel|service call|boiler|chiller|duct|compressor|generator|cooling tower)\b",
-     "kw:trades"),
+     "kw:trades",
+     r"\b(install(ation)?|capital project|new construction|renovation)\b"),
     ("Facilities / MRO","Janitorial","Cleaning",
      r"\b(janitorial|custodial|clean(ing|er)|mop|disinfect|sanitiz|floor wax|restroom supply)\b",
      "kw:janitorial"),
@@ -703,7 +717,8 @@ KEYWORD_PATTERNS = [
      "kw:svc_consulting"),
     ("Printing, Marketing & Communications","Printing","Print",
      r"\b(print(ing)?|typeset|binding|poster|banner|brochure|flyer|letterhead)\b",
-     "kw:printing"),
+     "kw:printing",
+     r"\b(3d print|printer|toner|cartridge|ink)\b"),
     ("Food & Catering","Food & Beverage","Catering",
      r"\b(cater(ing)?|food service|lunch|dinner|breakfast|refreshment|beverage|coffee service)\b",
      "kw:catering"),
@@ -751,10 +766,11 @@ ACCOUNT_FAMILY_MAP = {
     "411": ("Admin & Office","General Admin","Account 411xxx Parking"),
 }
 
-_COMPILED = [
-    (m, l2, l3, re.compile(p, re.IGNORECASE), hit)
-    for m, l2, l3, p, hit in KEYWORD_PATTERNS
-]
+_COMPILED = []
+for _entry in KEYWORD_PATTERNS:
+    m, l2, l3, p, hit = _entry[:5]
+    _exclude = re.compile(_entry[5], re.IGNORECASE) if len(_entry) > 5 else None
+    _COMPILED.append((m, l2, l3, re.compile(p, re.IGNORECASE), hit, _exclude))
 
 
 def categorize_row(row: dict) -> dict:
@@ -788,9 +804,11 @@ def categorize_row(row: dict) -> dict:
         if kw in cat1:
             return _r(m, l2, l3, 3, f"cat1:{kw[:20]}", 0.7)
 
-    # Pass 4: keyword / regex
-    for m, l2, l3, pattern, hit in _COMPILED:
+    # Pass 4: keyword / regex (with optional exclude patterns)
+    for m, l2, l3, pattern, hit, exclude in _COMPILED:
         if pattern.search(scan_text):
+            if exclude and exclude.search(scan_text):
+                continue
             return _r(m, l2, l3, 4, hit, 0.5)
 
     # Pass 5: account-family fallback

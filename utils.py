@@ -3,15 +3,20 @@ import pandas as pd
 
 
 def safe_num_series(s: pd.Series) -> pd.Series:
-    """Convert a currency-formatted Series to numeric, coercing errors to 0."""
-    return (
+    """Convert a currency-formatted Series to numeric, coercing errors to 0.
+    Handles: $1,234.56 and accounting-style negatives (1,234.56)."""
+    cleaned = (
         s.astype(str)
         .str.replace("$", "", regex=False)
         .str.replace(",", "", regex=False)
         .str.strip()
-        .pipe(pd.to_numeric, errors="coerce")
-        .fillna(0.0)
     )
+    # Detect accounting-style negatives: (123.45) → -123.45
+    is_neg = cleaned.str.startswith("(") & cleaned.str.endswith(")")
+    cleaned = cleaned.str.replace("(", "", regex=False).str.replace(")", "", regex=False)
+    result = pd.to_numeric(cleaned, errors="coerce").fillna(0.0)
+    result = result.where(~is_neg, -result)
+    return result
 
 
 def read_csv_robust(path: str) -> pd.DataFrame:
