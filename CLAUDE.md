@@ -8,8 +8,9 @@ Procurement data categorization pipeline (Python/pandas). Reads CSV procurement 
 - `run_categorization.py` — CLI runner
 - `build_detail_excel_v2.py` — Excel report builder
 - `aggregate_spend.py` — Spend-by-bucket aggregation
-- `launcher.py.py` — Pipeline orchestrator
+- `launcher.pyw` — Desktop GUI launcher (tkinter)
 - `utils.py` — Shared utilities (CSV reading, numeric parsing)
+- `reference/` — Source CSVs/XLSX the lookup tables were built from (not read at runtime)
 
 ## Resource Discipline
 - Inspect only necessary files
