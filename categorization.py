@@ -859,6 +859,31 @@ def categorize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     descs      = _get("Product Description")
     mfrs       = _get("Manufacturer")
 
+    # Pre-compute which columns are globally available (non-trivial content)
+    def _col_available(col_name):
+        if col_name not in df.columns:
+            return False
+        vals = df[col_name].astype(str).str.strip()
+        non_blank = ((vals != "") & (vals != "nan") & (vals != "None")).sum()
+        return non_blank / max(len(df), 1) > 0.05  # >5% populated = available
+
+    signals_present = {
+        "vendor":    _col_available("Vendor Name"),
+        "commodity": _col_available("Commodity Code"),
+        "account":   _col_available("Account"),
+        "cat1":      _col_available("Category Level 1"),
+        "desc":      _col_available("Product Description"),
+        "mfr":       _col_available("Manufacturer"),
+    }
+    signal_count = sum(signals_present.values())
+    # Confidence penalty when signals are missing: 6/6 = 1.0, 3/6 = 0.75, 1/6 = 0.5
+    signal_factor = 0.5 + 0.5 * (signal_count / 6.0)
+
+    if signal_count < 4:
+        missing = [k for k, v in signals_present.items() if not v]
+        print(f"  ⚠ Signal degradation: only {signal_count}/6 input signals available. "
+              f"Missing: {', '.join(missing)}. Confidence scores will be reduced.")
+
     rows_out = []
     for i in range(len(df)):
         row = {
@@ -869,17 +894,22 @@ def categorize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             "Product Description": descs[i],
             "Manufacturer": mfrs[i],
         }
-        rows_out.append(categorize_row(row))
+        result = categorize_row(row)
+        # Adjust confidence based on available signals
+        result["confidence_score"] = round(result["confidence_score"] * signal_factor, 2)
+        # Also check per-row: if this row's specific winning signal is the ONLY
+        # non-blank field, drop confidence further
+        row_signals = sum(1 for v in row.values() if v.strip() and v.strip().lower() not in ("nan", "none"))
+        if row_signals <= 1 and result["rule_pass"] >= 4:
+            result["confidence_score"] = min(result["confidence_score"], 0.15)
+        rows_out.append(result)
 
     results = pd.DataFrame(rows_out)
 
-    # Vectorized label lookups
-    _cl = {0.95: "Very High", 0.9: "Very High", 0.7: "High", 0.5: "Medium", 0.2: "Low", 0.1: "Low"}
+    # Vectorized label lookups — re-derive labels from adjusted scores
+    results["confidence_label"] = results["confidence_score"].apply(confidence_label)
     _rpl = {0: "Vendor Hard Override", 1: "Commodity Code Crosswalk", 2: "Vendor Always-List",
             3: "Category Metadata", 4: "Keyword / Regex", 5: "Account-Family Fallback"}
-
-    results["confidence_label"] = results["confidence_score"].map(_cl).fillna(
-        results["confidence_score"].apply(confidence_label))
     results["rule_pass_label"] = results["rule_pass"].map(_rpl).fillna("Unknown")
     results["services_review_flag"] = (
         (results["master_bucket"] == "Services")

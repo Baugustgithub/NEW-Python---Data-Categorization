@@ -6,6 +6,14 @@ Three ways to use:
   2. python run_categorization.py myfile.csv          → specific input, default output
   3. python run_categorization.py myfile.csv out.csv  → specific input and output
      (The GUI uses option 2/3 — passing the file you browsed to)
+
+Pipeline stages:
+  1. Ingest        — read CSV/Excel
+  2. Normalize     — map column aliases to canonical names
+  3. Validate      — fail-fast on missing required columns, warn on recommended
+  4. Categorize    — 5-pass rule engine
+  5. QA            — post-categorization diagnostics
+  6. Export        — write CSV + optional Excel
 """
 
 import sys, os, glob
@@ -14,6 +22,9 @@ import pandas as pd
 script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, script_dir)
 from categorization import categorize_dataframe
+from schema import (normalize_columns, validate_schema, diagnose_schema,
+                    print_diagnostics, print_post_categorization_diagnostics)
+from utils import safe_num_series
 
 
 def _is_interactive():
@@ -38,7 +49,7 @@ def build_excel_report(df, output_path):
 
 
 def main():
-    # ── Decide input file(s) ─────────────────────────────────────────────────
+    # ── Stage 1: Decide input file(s) ────────────────────────────────────────
     if len(sys.argv) > 1:
         input_files = [sys.argv[1]]
         if not os.path.exists(input_files[0]):
@@ -58,7 +69,7 @@ def main():
 
     output_file = sys.argv[2] if len(sys.argv) > 2 else os.path.join(script_dir, "categorized_output.csv")
 
-    # ── Read file(s) ─────────────────────────────────────────────────────────
+    # ── Stage 1: Ingest ──────────────────────────────────────────────────────
     dfs = []
     for f in input_files:
         print(f"Reading: {os.path.basename(f)}")
@@ -72,8 +83,31 @@ def main():
 
     df = pd.concat(dfs, ignore_index=True)
     print(f"Total rows: {len(df):,}")
+    print(f"Input columns ({len(df.columns)}): {list(df.columns)}")
 
-    # ── Categorize ───────────────────────────────────────────────────────────
+    # ── Stage 2: Schema Normalization ────────────────────────────────────────
+    df, mapping_report = normalize_columns(df)
+
+    # ── Stage 3: Schema Validation ───────────────────────────────────────────
+    errors, warnings = validate_schema(df)
+
+    # Diagnostics (runs even if there are errors, so user sees full picture)
+    diag = diagnose_schema(df, mapping_report)
+    print_diagnostics(diag, warnings)
+
+    if errors:
+        print("\n" + "!" * 70)
+        print("  FATAL: Cannot proceed — required columns are missing:")
+        for e in errors:
+            print(f"    ✗ {e}")
+        print("!" * 70)
+        print("\n  Check that your export includes the expected columns.")
+        print("  If column names have changed, update the aliases in schema.py.\n")
+        if _is_interactive():
+            input("\nPress Enter to exit...")
+        sys.exit(1)
+
+    # ── Stage 4: Categorize ──────────────────────────────────────────────────
     print("Categorizing...")
     results = categorize_dataframe(df)
 
@@ -95,12 +129,25 @@ def main():
         if pos:
             out[col] = results.iloc[:, pos[-1]].values
 
-    # ── Write output ─────────────────────────────────────────────────────────
+    # ── Stage 5: QA Diagnostics ──────────────────────────────────────────────
+    # Need _spend column for QA checks
+    if "Extended Price" in out.columns:
+        out["_spend"] = safe_num_series(out["Extended Price"])
+    else:
+        out["_spend"] = 0.0
+
+    total_spend = float(out["_spend"].sum())
+    qa_flags = print_post_categorization_diagnostics(out, total_spend)
+
+    # Drop temp column before writing
+    out_write = out.drop(columns=["_spend"], errors="ignore")
+
+    # ── Stage 6: Export ──────────────────────────────────────────────────────
     out_dir = os.path.dirname(output_file)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
 
-    out.to_csv(output_file, index=False, encoding="utf-8-sig")
+    out_write.to_csv(output_file, index=False, encoding="utf-8-sig")
     print(f"Written to: {output_file}")
 
     # ── Bucket summary ───────────────────────────────────────────────────────
@@ -120,13 +167,15 @@ def main():
     # ── Services review queue ────────────────────────────────────────────────
     if "services_review_flag" in out.columns:
         review_count = out["services_review_flag"].sum()
-        spend_col    = next((c for c in out.columns if "extended" in c.lower() and "price" in c.lower()), None)
-        review_spend = out.loc[out["services_review_flag"] == True, spend_col].sum() if spend_col else 0
+        spend_col = "Extended Price" if "Extended Price" in out.columns else None
+        if not spend_col:
+            spend_col = next((c for c in out.columns if "extended" in c.lower() and "price" in c.lower()), None)
+        review_spend = safe_num_series(out.loc[out["services_review_flag"] == True, spend_col]).sum() if spend_col else 0
         print(f"\n-- Services Review Queue --")
         print(f"  {review_count:,} rows need sub-classification  "
               + (f"  ${review_spend:,.0f} spend" if review_spend else ""))
 
-    return out
+    return out_write
 
 
 if __name__ == "__main__":
